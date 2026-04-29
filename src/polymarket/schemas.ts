@@ -24,20 +24,62 @@ export const PolymarketTradeSchema = z.object({
 
 export type PolymarketTrade = z.infer<typeof PolymarketTradeSchema>;
 
+function nullableNumber(value: unknown): number | null {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'string' && value.trim() !== '') {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+}
+
+function parseOutcomePrice(value: unknown, index: number): number | null {
+  if (Array.isArray(value)) return nullableNumber(value[index]);
+  if (typeof value !== 'string') return null;
+
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed) ? nullableNumber(parsed[index]) : null;
+  } catch {
+    return null;
+  }
+}
+
 export const GammaMarketSchema = z.object({
   conditionId: z.string(),
   slug: z.string(),
-  title: z.string(),
-  category: z.string().nullable(),
-  eventSlug: z.string().nullable(),
-  endDate: z.string().nullable(),
+  title: z.string().optional(),
+  question: z.string().optional(),
+  category: z.string().nullable().optional(),
+  eventSlug: z.string().nullable().optional(),
+  events: z.array(z.object({
+    slug: z.string().optional(),
+    category: z.string().nullable().optional(),
+  }).passthrough()).optional(),
+  endDate: z.string().nullable().optional(),
   active: z.boolean().optional(),
   closed: z.boolean().optional(),
-  yesPrice: z.number().nullable(),
-  noPrice: z.number().nullable(),
-  volume24h: z.number().nullable(),
-  liquidity: z.number().nullable(),
-});
+  yesPrice: z.union([z.number(), z.string()]).nullable().optional(),
+  noPrice: z.union([z.number(), z.string()]).nullable().optional(),
+  outcomePrices: z.unknown().optional(),
+  volume24h: z.union([z.number(), z.string()]).nullable().optional(),
+  volume24hr: z.union([z.number(), z.string()]).nullable().optional(),
+  liquidity: z.union([z.number(), z.string()]).nullable().optional(),
+  liquidityNum: z.number().nullable().optional(),
+}).passthrough().transform((m) => ({
+  conditionId: m.conditionId,
+  slug: m.slug,
+  title: m.title ?? m.question ?? m.slug,
+  category: m.category ?? m.events?.[0]?.category ?? null,
+  eventSlug: m.eventSlug ?? m.events?.[0]?.slug ?? null,
+  endDate: m.endDate ?? null,
+  active: m.active,
+  closed: m.closed,
+  yesPrice: nullableNumber(m.yesPrice) ?? parseOutcomePrice(m.outcomePrices, 0),
+  noPrice: nullableNumber(m.noPrice) ?? parseOutcomePrice(m.outcomePrices, 1),
+  volume24h: nullableNumber(m.volume24h) ?? nullableNumber(m.volume24hr),
+  liquidity: nullableNumber(m.liquidityNum) ?? nullableNumber(m.liquidity),
+}));
 
 export type GammaMarket = z.infer<typeof GammaMarketSchema>;
 

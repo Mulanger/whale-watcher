@@ -25,7 +25,7 @@ async function get<T>(
   baseUrl: string,
   path: string,
   query: Record<string, unknown>,
-  schema: z.ZodSchema<T>
+  schema: z.ZodType<T, z.ZodTypeDef, unknown>
 ): Promise<T> {
   const url = new URL(path, baseUrl);
   for (const [k, v] of Object.entries(query)) {
@@ -77,7 +77,17 @@ export async function getTrades(params: {
 
 export async function getMarket(conditionId: string): Promise<GammaMarket> {
   const config = loadConfig();
-  return get(config.polymarketGammaUrl, `/markets/${conditionId}`, {}, GammaMarketSchema);
+  const markets = await get(
+    config.polymarketGammaUrl,
+    '/markets',
+    { condition_ids: conditionId },
+    GammaMarketSchema.array()
+  );
+  const exactMatch = markets.find((market) => market.conditionId.toLowerCase() === conditionId.toLowerCase());
+  if (!exactMatch) {
+    throw new AbortError(`market not found for conditionId ${conditionId}`);
+  }
+  return exactMatch;
 }
 
 export async function getEvent(eventId: string): Promise<GammaEvent> {
