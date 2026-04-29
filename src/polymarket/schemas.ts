@@ -45,6 +45,13 @@ function parseOutcomePrice(value: unknown, index: number): number | null {
   }
 }
 
+function numberOr(defaultValue: number) {
+  return z.preprocess((value) => {
+    if (typeof value === 'string' && value.trim() !== '') return Number(value);
+    return value;
+  }, z.number()).catch(defaultValue);
+}
+
 export const GammaMarketSchema = z.object({
   conditionId: z.string(),
   slug: z.string(),
@@ -106,29 +113,26 @@ export const GammaEventSchema = z.object({
 
 export type GammaEvent = z.infer<typeof GammaEventSchema>;
 
-export const UserPositionsSchema = z.object({
-  user: z.string(),
-  positions: z.array(z.object({
-    market: z.string(),
-    size: z.number(),
-    value: z.number(),
-  })).optional(),
-});
-
-export type UserPositions = z.infer<typeof UserPositionsSchema>;
-
 export const PositionSchema = z.object({
   proxyWallet: z.string(),
   asset: z.string(),
   conditionId: z.string(),
-  size: z.number(),
-  avgPrice: z.number(),
-  totalBought: z.number(),
-  realizedPnl: z.number(),
-  outcomeIndex: z.number(),
-  outcome: z.string(),
-});
+  size: numberOr(0),
+  avgPrice: numberOr(0),
+  initialValue: numberOr(0),
+  currentValue: numberOr(0),
+  cashPnl: numberOr(0),
+  totalBought: numberOr(0),
+  realizedPnl: numberOr(0),
+  curPrice: numberOr(0),
+  outcomeIndex: numberOr(-1),
+  outcome: z.string().catch(''),
+}).passthrough();
 
 export type Position = z.infer<typeof PositionSchema>;
 
 export const PositionsResponseSchema = PositionSchema.array();
+
+export const UserPositionsSchema = PositionsResponseSchema;
+
+export type UserPositions = z.infer<typeof UserPositionsSchema>;

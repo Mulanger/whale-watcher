@@ -3,6 +3,7 @@ import { classifyTier } from '../src/pipeline/tier_classifier.js';
 import { synthesizeTradeId } from '../src/pipeline/dedup.js';
 import { classifyIntent, shouldShowInFeed, TransientLagError } from '../src/pipeline/intent_classifier.js';
 import { normalizeOutcome } from '../src/pipeline/outcome.js';
+import { PositionsResponseSchema } from '../src/polymarket/schemas.js';
 
 describe('classifyTier', () => {
   it('returns mega for >= 250k', () => {
@@ -156,5 +157,41 @@ describe('classifyIntent', () => {
       { side: 'BUY', size: 100, asset: 'a1' },
       { asset: 'a1', size: 80 }
     )).toThrow(TransientLagError);
+  });
+
+  it('classifies SELL with no remaining position as CLOSE', () => {
+    const intent = classifyIntent(
+      { side: 'SELL', size: 100, asset: 'a1' },
+      null
+    );
+    expect(intent).toBe('CLOSE');
+  });
+});
+
+describe('PositionsResponseSchema', () => {
+  it('parses Polymarket positions array responses', () => {
+    const parsed = PositionsResponseSchema.parse([
+      {
+        proxyWallet: '0xd4140031e313f8d850740a80d2ee6653c925a4db',
+        asset: '1910830010387565971650098373488592514702818137344973088263643820608151819241',
+        conditionId: '0x5db999fad322cea2914535aae5517060c3f80ad6d8c0231cde2124a434d16846',
+        size: 12381.5451,
+        avgPrice: '0.7134',
+        initialValue: 8834.0219,
+        currentValue: 8357.5429,
+        cashPnl: -476.479,
+        totalBought: 17693.4951,
+        realizedPnl: 250.8348,
+        curPrice: 0.675,
+        outcomeIndex: 1,
+        outcome: 'No',
+        title: 'Will the U.S. invade Iran before 2027?',
+      },
+    ]);
+
+    expect(parsed).toHaveLength(1);
+    expect(parsed[0].size).toBe(12381.5451);
+    expect(parsed[0].avgPrice).toBe(0.7134);
+    expect(parsed[0].currentValue).toBe(8357.5429);
   });
 });

@@ -31,13 +31,14 @@ export async function refreshTraderStats(
       let totalPnl = 0;
       let wins = 0;
 
-      if (positions.positions) {
-        for (const pos of positions.positions) {
-          vol30d += Math.abs(pos.value);
-          tradeCount += 1;
-          totalPnl += pos.value;
-          if (pos.value > 0) wins++;
-        }
+      for (const pos of positions) {
+        const currentValue = pos.currentValue || (pos.size * pos.curPrice);
+        const pnl = pos.cashPnl + pos.realizedPnl;
+
+        vol30d += Math.abs(currentValue);
+        tradeCount += 1;
+        totalPnl += pnl;
+        if (pnl > 0) wins++;
       }
 
       const winRate = tradeCount > 0 ? wins / tradeCount : null;

@@ -1,4 +1,3 @@
-import { MongoBulkWriteError } from 'mongodb';
 import { loadConfig } from '../config.js';
 import { getLogger } from '../logger.js';
 import { getTrades } from '../polymarket/client.js';
@@ -69,22 +68,38 @@ export class TradesPoller {
       this.state.lastPollAt = now;
       this.state.lastError = null;
 
-      const newTrades: Array<{ whale: EnrichedWhale; rawTrade: PolymarketTrade }> = [];
+      const candidates: Array<{ id: string; rawTrade: PolymarketTrade }> = [];
+      const idsInPoll = new Set<string>();
 
       for (const t of rawTrades) {
         const id = synthesizeTradeId(t);
-        if (this.seenIds.has(id)) continue;
+        if (this.seenIds.has(id) || idsInPoll.has(id)) continue;
 
         const usd = t.size * t.price;
         if (usd < this.config.whaleUsdFloor) continue;
 
-        const enriched = await enrich(t);
-        newTrades.push({ whale: enriched, rawTrade: t });
+        candidates.push({ id, rawTrade: t });
+        idsInPoll.add(id);
+      }
+
+      const existingIds = await this.findExistingIds(candidates.map((candidate) => candidate.id));
+      for (const id of existingIds) {
         this.addToSeen(id);
       }
 
+      const newTrades: Array<{ whale: EnrichedWhale; rawTrade: PolymarketTrade }> = [];
+      for (const candidate of candidates) {
+        if (existingIds.has(candidate.id)) continue;
+
+        const enriched = await enrich(candidate.rawTrade);
+        newTrades.push({ whale: enriched, rawTrade: candidate.rawTrade });
+      }
+
       if (newTrades.length > 0) {
-        await this.insertWhales(newTrades);
+        const handledIds = await this.insertWhales(newTrades);
+        for (const id of handledIds) {
+          this.addToSeen(id);
+        }
       }
 
       const biggest = newTrades.length > 0
@@ -109,37 +124,43 @@ export class TradesPoller {
     }
   }
 
-  private async insertWhales(items: Array<{ whale: EnrichedWhale; rawTrade: PolymarketTrade }>): Promise<void> {
+  private async findExistingIds(ids: string[]): Promise<Set<string>> {
+    if (ids.length === 0) return new Set();
+
+    const existing = await this.tradesCollection
+      .find(
+        { _id: { $in: ids } },
+        { projection: { _id: 1 } }
+      )
+      .toArray();
+
+    return new Set(existing.map((doc) => doc._id));
+  }
+
+  private async insertWhales(items: Array<{ whale: EnrichedWhale; rawTrade: PolymarketTrade }>): Promise<string[]> {
+    const handledIds: string[] = [];
+
     if (this.config.intentClassificationEnabled) {
       for (const item of items) {
         await this.onWhale(item.whale, item.rawTrade);
+        handledIds.push(item.whale._id);
       }
       this.state.tradesIngestedTotal += items.length;
-      return;
+      return handledIds;
     }
 
-    try {
-      const whales = items.map((item) => item.whale);
-      await this.tradesCollection.bulkWrite(
-        whales.map(w => ({ insertOne: { document: w } })),
-        { ordered: false }
-      );
-      this.state.tradesIngestedTotal += whales.length;
-
-      for (const item of items) {
+    for (const item of items) {
+      try {
+        await this.tradesCollection.insertOne(item.whale);
         await this.onWhale(item.whale, item.rawTrade);
+        this.state.tradesIngestedTotal += 1;
+      } catch (err) {
+        if (!isDuplicateKeyError(err)) throw err;
       }
-    } catch (err) {
-      if (err instanceof MongoBulkWriteError) {
-        const writeErrorsArr = Array.isArray(err.writeErrors) ? err.writeErrors : [err.writeErrors];
-        const realErrors = writeErrorsArr.filter((e: any) => e.code !== 11000);
-        if (realErrors.length > 0) {
-          throw err;
-        }
-      } else {
-        throw err;
-      }
+      handledIds.push(item.whale._id);
     }
+
+    return handledIds;
   }
 
   private addToSeen(id: string): void {
@@ -149,4 +170,11 @@ export class TradesPoller {
     }
     this.seenIds.add(id);
   }
+}
+
+function isDuplicateKeyError(err: unknown): boolean {
+  return typeof err === 'object'
+    && err !== null
+    && 'code' in err
+    && (err as { code?: number }).code === 11000;
 }
