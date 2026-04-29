@@ -4,16 +4,20 @@ import { connectMongo, closeMongo, isMongoConnected } from './db/mongo.js';
 import { ensureIndexes } from './db/indexes.js';
 import { connectRedis, closeRedis, isRedisConnected, publishWhale } from './redis/publisher.js';
 import { TradesPoller } from './pipeline/trades_poller.js';
+import { AllTradesPoller } from './pipeline/all_trades_poller.js';
 import { pushPending } from './redis/pending_queue.js';
 import { runIntentWorker, stopIntentWorker } from './pipeline/intent_worker.js';
 import { startRefreshMarketsJob } from './jobs/refresh_markets.js';
 import { startRefreshTraderStatsJob } from './jobs/refresh_trader_stats.js';
+import { startDailyAggregator } from './jobs/aggregate_daily_stats.js';
 import { startHealthServer } from './http/health.js';
 
 let shuttingDown = false;
 let poller: TradesPoller | null = null;
+let allTradesPoller: AllTradesPoller | null = null;
 let refreshMarketsInterval: ReturnType<typeof setInterval> | null = null;
 let refreshTradersInterval: ReturnType<typeof setInterval> | null = null;
+let dailyAggregatorInterval: ReturnType<typeof setInterval> | null = null;
 let healthServer: ReturnType<typeof startHealthServer> | null = null;
 
 async function main(): Promise<void> {
@@ -22,8 +26,15 @@ async function main(): Promise<void> {
 
   log.info('Starting whale-watcher...');
 
-  const { trades, markets, traders, intentDiscards } = await connectMongo();
-  await ensureIndexes(trades, markets, traders, intentDiscards);
+  const {
+    trades,
+    markets,
+    traders,
+    intentDiscards,
+    tradeEvents,
+    traderDailyStats,
+  } = await connectMongo();
+  await ensureIndexes(trades, markets, traders, intentDiscards, tradeEvents, traderDailyStats);
 
   await connectRedis();
 
@@ -53,6 +64,12 @@ async function main(): Promise<void> {
   refreshMarketsInterval = startRefreshMarketsJob(trades, markets);
   refreshTradersInterval = startRefreshTraderStatsJob(trades, traders);
 
+  if (config.tradeEventsEnabled) {
+    allTradesPoller = new AllTradesPoller(tradeEvents);
+    await allTradesPoller.start();
+    dailyAggregatorInterval = startDailyAggregator(tradeEvents, traderDailyStats);
+  }
+
   healthServer = startHealthServer(config.healthPort, () => {
     const state = poller?.getState() ?? {
       tradesIngestedTotal: 0,
@@ -79,10 +96,12 @@ process.on('SIGTERM', async () => {
   log.info('Received SIGTERM, shutting down...');
 
   if (poller) await poller.stop();
+  if (allTradesPoller) await allTradesPoller.stop();
   stopIntentWorker();
 
   if (refreshMarketsInterval) clearInterval(refreshMarketsInterval);
   if (refreshTradersInterval) clearInterval(refreshTradersInterval);
+  if (dailyAggregatorInterval) clearInterval(dailyAggregatorInterval);
 
   await Promise.all([closeMongo(), closeRedis()]);
 
@@ -99,10 +118,12 @@ process.on('SIGINT', async () => {
   log.info('Received SIGINT, shutting down...');
 
   if (poller) await poller.stop();
+  if (allTradesPoller) await allTradesPoller.stop();
   stopIntentWorker();
 
   if (refreshMarketsInterval) clearInterval(refreshMarketsInterval);
   if (refreshTradersInterval) clearInterval(refreshTradersInterval);
+  if (dailyAggregatorInterval) clearInterval(dailyAggregatorInterval);
 
   await Promise.all([closeMongo(), closeRedis()]);
 

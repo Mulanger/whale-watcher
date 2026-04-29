@@ -1,12 +1,21 @@
 import type { Collection } from 'mongodb';
-import type { EnrichedWhale, MarketDoc, TraderDoc, IntentDiscardDoc } from './mongo.js';
+import type {
+  EnrichedWhale,
+  MarketDoc,
+  TraderDoc,
+  IntentDiscardDoc,
+  TradeEventDoc,
+  TraderDailyStatsDoc,
+} from './mongo.js';
 import { getLogger } from '../logger.js';
 
 export async function ensureIndexes(
   trades: Collection<EnrichedWhale>,
   markets: Collection<MarketDoc>,
   traders: Collection<TraderDoc>,
-  intentDiscards: Collection<IntentDiscardDoc>
+  intentDiscards: Collection<IntentDiscardDoc>,
+  tradeEvents: Collection<TradeEventDoc>,
+  traderDailyStats: Collection<TraderDailyStatsDoc>
 ): Promise<void> {
   const log = getLogger();
 
@@ -41,6 +50,22 @@ export async function ensureIndexes(
       expireAfterSeconds: 14 * 24 * 60 * 60,
       name: 'idx_intentDiscards_ttl',
     },
+  ]);
+
+  await tradeEvents.createIndexes([
+    { key: { proxyWallet: 1, timestamp: -1 } },
+    { key: { timestamp: -1 } },
+    { key: { conditionId: 1, timestamp: -1 } },
+    {
+      key: { ingestedAt: 1 },
+      expireAfterSeconds: 400 * 24 * 60 * 60,
+      name: 'idx_tradeEvents_ttl',
+    },
+  ]);
+
+  await traderDailyStats.createIndexes([
+    { key: { date: 1, volume: -1 } },
+    { key: { proxyWallet: 1, date: -1 } },
   ]);
 
   log.info('Indexes ensured');

@@ -78,6 +78,36 @@ export interface TraderDoc {
   refreshedAt: Date;
 }
 
+export interface TradeEventDoc {
+  _id: string;
+  proxyWallet: string;
+  pseudonym: string | null;
+  side: 'BUY' | 'SELL';
+  outcome: 'YES' | 'NO';
+  usdSize: number;
+  shares: number;
+  priceCents: number;
+  conditionId: string;
+  marketSlug: string;
+  category: string | null;
+  timestamp: number;
+  ingestedAt: Date;
+  isWhale: boolean;
+}
+
+export interface TraderDailyStatsDoc {
+  _id: string;
+  proxyWallet: string;
+  pseudonym: string | null;
+  date: string;
+  volume: number;
+  tradeCount: number;
+  buyVolume: number;
+  sellVolume: number;
+  whaleCount: number;
+  updatedAt: Date;
+}
+
 export type WhaleTier = 'mega' | 'large' | 'whale' | 'mini' | 'sub';
 
 export async function connectMongo(): Promise<{
@@ -87,6 +117,8 @@ export async function connectMongo(): Promise<{
   markets: Collection<MarketDoc>;
   traders: Collection<TraderDoc>;
   intentDiscards: Collection<IntentDiscardDoc>;
+  tradeEvents: Collection<TradeEventDoc>;
+  traderDailyStats: Collection<TraderDailyStatsDoc>;
 }> {
   const config = loadConfig();
   const log = getLogger();
@@ -99,6 +131,8 @@ export async function connectMongo(): Promise<{
       markets: _db.collection<MarketDoc>('markets'),
       traders: _db.collection<TraderDoc>('traders'),
       intentDiscards: _db.collection<IntentDiscardDoc>('intent_discards'),
+      tradeEvents: _db.collection<TradeEventDoc>('trade_events'),
+      traderDailyStats: _db.collection<TraderDailyStatsDoc>('trader_daily_stats'),
     };
   }
 
@@ -116,6 +150,8 @@ export async function connectMongo(): Promise<{
     markets: _db.collection<MarketDoc>('markets'),
     traders: _db.collection<TraderDoc>('traders'),
     intentDiscards: _db.collection<IntentDiscardDoc>('intent_discards'),
+    tradeEvents: _db.collection<TradeEventDoc>('trade_events'),
+    traderDailyStats: _db.collection<TraderDailyStatsDoc>('trader_daily_stats'),
   };
 }
 
