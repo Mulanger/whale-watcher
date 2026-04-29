@@ -109,16 +109,22 @@ async function processOne(
     }
   } else {
     const discardIntent = intent as 'DECREASE' | 'CLOSE';
-    await intentDiscards.insertOne({
-      _id: item.id,
-      wallet,
-      conditionId,
-      intent: discardIntent,
-      side: rawTrade.side,
-      usdSize: rawTrade.size * rawTrade.price,
-      timestamp: rawTrade.timestamp,
-      discardedAt: new Date(),
-    });
+    await intentDiscards.updateOne(
+      { _id: item.id },
+      {
+        $setOnInsert: {
+          _id: item.id,
+          wallet,
+          conditionId,
+          intent: discardIntent,
+          side: rawTrade.side,
+          usdSize: rawTrade.size * rawTrade.price,
+          timestamp: rawTrade.timestamp,
+          discardedAt: new Date(),
+        },
+      },
+      { upsert: true }
+    );
     log.debug({ id: item.id, intent, usd: enrichedDoc.usdSize }, 'whale filtered');
   }
 
