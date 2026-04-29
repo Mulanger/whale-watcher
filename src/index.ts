@@ -9,7 +9,7 @@ import { pushPending } from './redis/pending_queue.js';
 import { runIntentWorker, stopIntentWorker } from './pipeline/intent_worker.js';
 import { startRefreshMarketsJob } from './jobs/refresh_markets.js';
 import { startRefreshTraderStatsJob } from './jobs/refresh_trader_stats.js';
-import { startDailyAggregator } from './jobs/aggregate_daily_stats.js';
+import { startDailyAggregator, type DailyAggregatorHandle } from './jobs/aggregate_daily_stats.js';
 import { startHealthServer } from './http/health.js';
 
 let shuttingDown = false;
@@ -17,7 +17,7 @@ let poller: TradesPoller | null = null;
 let allTradesPoller: AllTradesPoller | null = null;
 let refreshMarketsInterval: ReturnType<typeof setInterval> | null = null;
 let refreshTradersInterval: ReturnType<typeof setInterval> | null = null;
-let dailyAggregatorInterval: ReturnType<typeof setInterval> | null = null;
+let dailyAggregator: DailyAggregatorHandle | null = null;
 let healthServer: ReturnType<typeof startHealthServer> | null = null;
 
 async function main(): Promise<void> {
@@ -67,7 +67,7 @@ async function main(): Promise<void> {
   if (config.tradeEventsEnabled) {
     allTradesPoller = new AllTradesPoller(tradeEvents);
     await allTradesPoller.start();
-    dailyAggregatorInterval = startDailyAggregator(tradeEvents, traderDailyStats);
+    dailyAggregator = startDailyAggregator(tradeEvents, traderDailyStats, trades);
   }
 
   healthServer = startHealthServer(config.healthPort, () => {
@@ -83,6 +83,7 @@ async function main(): Promise<void> {
       lastPollAge: state.lastPollAt ? Date.now() - state.lastPollAt : Infinity,
       tradesIngestedTotal: state.tradesIngestedTotal,
       lastError: state.lastError,
+      leaderboard: getLeaderboardHealth(config, allTradesPoller, dailyAggregator),
     };
   });
 
@@ -101,7 +102,7 @@ process.on('SIGTERM', async () => {
 
   if (refreshMarketsInterval) clearInterval(refreshMarketsInterval);
   if (refreshTradersInterval) clearInterval(refreshTradersInterval);
-  if (dailyAggregatorInterval) clearInterval(dailyAggregatorInterval);
+  if (dailyAggregator) dailyAggregator.stop();
 
   await Promise.all([closeMongo(), closeRedis()]);
 
@@ -123,7 +124,7 @@ process.on('SIGINT', async () => {
 
   if (refreshMarketsInterval) clearInterval(refreshMarketsInterval);
   if (refreshTradersInterval) clearInterval(refreshTradersInterval);
-  if (dailyAggregatorInterval) clearInterval(dailyAggregatorInterval);
+  if (dailyAggregator) dailyAggregator.stop();
 
   await Promise.all([closeMongo(), closeRedis()]);
 
@@ -137,3 +138,51 @@ main().catch((err) => {
   console.error('Fatal error:', err);
   process.exit(1);
 });
+
+function getLeaderboardHealth(
+  config: ReturnType<typeof loadConfig>,
+  pollerInstance: AllTradesPoller | null,
+  aggregator: DailyAggregatorHandle | null
+) {
+  if (!config.tradeEventsEnabled) {
+    return { enabled: false, ok: true };
+  }
+
+  const now = Date.now();
+  const allTradesState = pollerInstance?.getState() ?? null;
+  const dailyAggregatorState = aggregator?.getState() ?? null;
+  const allTradesLastPollAge = allTradesState?.lastPollAt ? now - allTradesState.lastPollAt : Infinity;
+  const dailyAggregatorLastRunAge = dailyAggregatorState?.lastRunAt ? now - dailyAggregatorState.lastRunAt : Infinity;
+  const allTradesStaleAfterMs = Math.max(config.allTradesIntervalMs * 4, 120_000);
+  const dailyAggregatorStaleAfterMs = Math.max(config.dailyAggregatorIntervalMs * 2, 10 * 60_000);
+  const ok = Boolean(allTradesState && dailyAggregatorState)
+    && allTradesLastPollAge < allTradesStaleAfterMs
+    && dailyAggregatorLastRunAge < dailyAggregatorStaleAfterMs
+    && !allTradesState?.lastError
+    && !dailyAggregatorState?.lastError;
+
+  return {
+    enabled: true,
+    ok,
+    allTrades: {
+      lastPollAt: allTradesState?.lastPollAt ?? null,
+      lastPollAge: allTradesLastPollAge,
+      lastError: allTradesState?.lastError ?? null,
+      tradeEventsIngestedTotal: allTradesState?.tradeEventsIngestedTotal ?? 0,
+      lastAttempted: allTradesState?.lastAttempted ?? 0,
+      lastInserted: allTradesState?.lastInserted ?? 0,
+      lastDuplicateSkipped: allTradesState?.lastDuplicateSkipped ?? 0,
+      skippedOverlappingPolls: allTradesState?.skippedOverlappingPolls ?? 0,
+      staleAfterMs: allTradesStaleAfterMs,
+    },
+    dailyAggregator: {
+      lastRunAt: dailyAggregatorState?.lastRunAt ?? null,
+      lastRunAge: dailyAggregatorLastRunAge,
+      lastError: dailyAggregatorState?.lastError ?? null,
+      lastRowsUpdated: dailyAggregatorState?.lastRowsUpdated ?? 0,
+      lastAggregatedDays: dailyAggregatorState?.lastAggregatedDays ?? [],
+      running: dailyAggregatorState?.running ?? false,
+      staleAfterMs: dailyAggregatorStaleAfterMs,
+    },
+  };
+}

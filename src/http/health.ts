@@ -1,5 +1,29 @@
 import { createServer } from 'node:http';
-import type { PollerState } from '../pipeline/trades_poller.js';
+
+export interface LeaderboardHealthStatus {
+  enabled: boolean;
+  ok: boolean;
+  allTrades?: {
+    lastPollAt: number | null;
+    lastPollAge: number;
+    lastError: string | null;
+    tradeEventsIngestedTotal: number;
+    lastAttempted: number;
+    lastInserted: number;
+    lastDuplicateSkipped: number;
+    skippedOverlappingPolls: number;
+    staleAfterMs: number;
+  };
+  dailyAggregator?: {
+    lastRunAt: number | null;
+    lastRunAge: number;
+    lastError: string | null;
+    lastRowsUpdated: number;
+    lastAggregatedDays: string[];
+    running: boolean;
+    staleAfterMs: number;
+  };
+}
 
 export interface HealthStatus {
   mongoConnected: boolean;
@@ -8,6 +32,7 @@ export interface HealthStatus {
   lastPollAge: number;
   tradesIngestedTotal: number;
   lastError: string | null;
+  leaderboard?: LeaderboardHealthStatus;
 }
 
 export function startHealthServer(
@@ -19,7 +44,8 @@ export function startHealthServer(
       const h = getStatus();
       const now = Date.now();
       const lastPollAge = h.lastPollAt ? now - h.lastPollAt : Infinity;
-      const ok = h.mongoConnected && h.redisConnected && lastPollAge < 30_000;
+      const leaderboardOk = h.leaderboard?.ok ?? true;
+      const ok = h.mongoConnected && h.redisConnected && lastPollAge < 30_000 && leaderboardOk;
 
       res.statusCode = ok ? 200 : 503;
       res.setHeader('content-type', 'application/json');
@@ -31,6 +57,7 @@ export function startHealthServer(
         lastPollAge,
         tradesIngestedTotal: h.tradesIngestedTotal,
         lastError: h.lastError,
+        leaderboard: h.leaderboard,
       }));
     } else {
       res.statusCode = 404;

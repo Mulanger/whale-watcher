@@ -5,6 +5,7 @@ import { getTrades } from '../polymarket/client.js';
 import { synthesizeTradeId } from './dedup.js';
 import { normalizeOutcome } from './outcome.js';
 import type { TradeEventDoc } from '../db/mongo.js';
+import type { PolymarketTrade } from '../polymarket/types.js';
 
 const SEEN_SET_MAX_SIZE = 200_000;
 
@@ -12,21 +13,38 @@ export interface AllTradesPollerState {
   tradeEventsIngestedTotal: number;
   lastPollAt: number | null;
   lastError: string | null;
+  lastAttempted: number;
+  lastInserted: number;
+  lastDuplicateSkipped: number;
+  skippedOverlappingPolls: number;
 }
 
 export class AllTradesPoller {
   private seenIds = new Set<string>();
   private config = loadConfig();
   private log = getLogger();
+  private fetchTrades: typeof getTrades;
+  private now: () => Date;
   private running = false;
+  private pollInProgress = false;
   private intervalId: ReturnType<typeof setInterval> | null = null;
   private state: AllTradesPollerState = {
     tradeEventsIngestedTotal: 0,
     lastPollAt: null,
     lastError: null,
+    lastAttempted: 0,
+    lastInserted: 0,
+    lastDuplicateSkipped: 0,
+    skippedOverlappingPolls: 0,
   };
 
-  constructor(private tradeEventsCollection: Collection<TradeEventDoc>) {}
+  constructor(
+    private tradeEventsCollection: Collection<TradeEventDoc>,
+    opts: { fetchTrades?: typeof getTrades; now?: () => Date } = {}
+  ) {
+    this.fetchTrades = opts.fetchTrades ?? getTrades;
+    this.now = opts.now ?? (() => new Date());
+  }
 
   getState(): AllTradesPollerState {
     return { ...this.state };
@@ -40,8 +58,10 @@ export class AllTradesPoller {
       intervalMs: this.config.allTradesIntervalMs,
       limit: this.config.tradeEventsPageLimit,
     }, 'Starting all-trades poller');
-    await this.poll();
-    this.intervalId = setInterval(() => this.poll(), this.config.allTradesIntervalMs);
+    await this.pollOnce();
+    this.intervalId = setInterval(() => {
+      if (this.running) void this.pollOnce();
+    }, this.config.allTradesIntervalMs);
   }
 
   async stop(): Promise<void> {
@@ -53,76 +73,120 @@ export class AllTradesPoller {
     this.log.info('All-trades poller stopped');
   }
 
-  private async poll(): Promise<void> {
-    if (!this.running) return;
-    const now = Date.now();
+  async pollOnce(): Promise<void> {
+    if (this.pollInProgress) {
+      this.state.skippedOverlappingPolls += 1;
+      this.log.warn('all_trades poll skipped because previous poll is still running');
+      return;
+    }
+
+    this.pollInProgress = true;
 
     try {
-      const rawTrades = await getTrades({
+      const rawTrades = await this.fetchTrades({
         limit: this.config.tradeEventsPageLimit,
         takerOnly: true,
         filterType: 'CASH',
         filterAmount: this.config.tradeEventsUsdFloor,
       });
 
-      this.state.lastPollAt = now;
-      this.state.lastError = null;
-
-      const toInsert: TradeEventDoc[] = [];
+      const candidates: TradeEventDoc[] = [];
+      const idsInPoll = new Set<string>();
       for (const t of rawTrades) {
-        const id = synthesizeTradeId(t);
-        if (this.seenIds.has(id)) continue;
-
-        const usd = t.size * t.price;
-        if (usd < this.config.tradeEventsUsdFloor) continue;
-
-        toInsert.push({
-          _id: id,
-          proxyWallet: t.proxyWallet.toLowerCase(),
-          pseudonym: t.pseudonym ?? null,
-          side: t.side,
-          outcome: normalizeOutcome(t.outcome),
-          usdSize: usd,
-          shares: t.size,
-          priceCents: Math.round(t.price * 100),
-          priceMillicents: Math.round(t.price * 10_000),
-          conditionId: t.conditionId,
-          marketSlug: t.slug,
-          category: null,
-          timestamp: t.timestamp,
-          ingestedAt: new Date(),
-          isWhale: usd >= this.config.whaleUsdFloor,
+        const event = buildTradeEvent(t, {
+          tradeEventsUsdFloor: this.config.tradeEventsUsdFloor,
+          whaleUsdFloor: this.config.whaleUsdFloor,
+          ingestedAt: this.now(),
         });
+        if (!event) continue;
+        if (this.seenIds.has(event._id) || idsInPoll.has(event._id)) continue;
+
+        candidates.push(event);
+        idsInPoll.add(event._id);
+      }
+
+      const existingIds = await this.findExistingIds(candidates.map((event) => event._id));
+      for (const id of existingIds) {
         this.addToSeen(id);
       }
 
+      const toInsert = candidates.filter((event) => !existingIds.has(event._id));
+      let inserted = 0;
+      let duplicateRaceSkipped = 0;
+      let handledIds: string[] = [];
       if (toInsert.length > 0) {
-        await this.insertTradeEvents(toInsert);
+        const result = await this.insertTradeEvents(toInsert);
+        inserted = result.inserted;
+        duplicateRaceSkipped = result.duplicateSkipped;
+        handledIds = result.handledIds;
+      }
+      for (const id of handledIds) {
+        this.addToSeen(id);
       }
 
-      this.log.info({ count: toInsert.length }, 'all_trades poll complete');
+      const duplicateSkipped = existingIds.size + duplicateRaceSkipped;
+      this.state.lastPollAt = Date.now();
+      this.state.lastError = null;
+      this.state.lastAttempted = candidates.length;
+      this.state.lastInserted = inserted;
+      this.state.lastDuplicateSkipped = duplicateSkipped;
+      this.state.tradeEventsIngestedTotal += inserted;
+
+      this.log.info({
+        fetched: rawTrades.length,
+        attempted: candidates.length,
+        inserted,
+        duplicateSkipped,
+      }, 'all_trades poll complete');
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       this.state.lastError = msg;
       this.log.error({ err: msg }, 'all_trades poll failed');
+    } finally {
+      this.pollInProgress = false;
     }
   }
 
-  private async insertTradeEvents(events: TradeEventDoc[]): Promise<void> {
+  private async findExistingIds(ids: string[]): Promise<Set<string>> {
+    if (ids.length === 0) return new Set();
+
+    const existing = await this.tradeEventsCollection
+      .find(
+        { _id: { $in: ids } },
+        { projection: { _id: 1 } }
+      )
+      .toArray();
+
+    return new Set(existing.map((doc) => doc._id));
+  }
+
+  private async insertTradeEvents(events: TradeEventDoc[]): Promise<{
+    inserted: number;
+    duplicateSkipped: number;
+    handledIds: string[];
+  }> {
     try {
       await this.tradeEventsCollection.bulkWrite(
         events.map((event) => ({ insertOne: { document: event } })),
         { ordered: false }
       );
-      this.state.tradeEventsIngestedTotal += events.length;
+      return {
+        inserted: events.length,
+        duplicateSkipped: 0,
+        handledIds: events.map((event) => event._id),
+      };
     } catch (err) {
       if (err instanceof MongoBulkWriteError) {
-        const writeErrorsArr = Array.isArray(err.writeErrors) ? err.writeErrors : [err.writeErrors];
+        const writeErrorsArr = getWriteErrors(err);
         const realErrors = writeErrorsArr.filter((e: { code?: number }) => e.code !== 11000);
         if (realErrors.length > 0) {
           throw err;
         }
-        return;
+        return {
+          inserted: events.length - writeErrorsArr.length,
+          duplicateSkipped: writeErrorsArr.length,
+          handledIds: events.map((event) => event._id),
+        };
       }
       throw err;
     }
@@ -135,4 +199,49 @@ export class AllTradesPoller {
     }
     this.seenIds.add(id);
   }
+}
+
+export function buildTradeEvent(
+  trade: PolymarketTrade,
+  opts: {
+    tradeEventsUsdFloor: number;
+    whaleUsdFloor: number;
+    ingestedAt?: Date;
+  }
+): TradeEventDoc | null {
+  const usd = trade.size * trade.price;
+  if (usd < opts.tradeEventsUsdFloor) return null;
+
+  return {
+    _id: synthesizeTradeId(trade),
+    proxyWallet: trade.proxyWallet.toLowerCase(),
+    pseudonym: trade.pseudonym ?? null,
+    side: trade.side,
+    outcome: normalizeOutcome(trade.outcome),
+    usdSize: usd,
+    shares: trade.size,
+    priceCents: Math.round(trade.price * 100),
+    priceMillicents: Math.round(trade.price * 10_000),
+    conditionId: trade.conditionId,
+    marketSlug: trade.slug,
+    category: null,
+    timestamp: trade.timestamp,
+    ingestedAt: opts.ingestedAt ?? new Date(),
+    isWhale: usd >= opts.whaleUsdFloor,
+  };
+}
+
+function getWriteErrors(err: MongoBulkWriteError): Array<{ code?: number }> {
+  const writeErrors = err.writeErrors as unknown;
+  if (!writeErrors) return [];
+  if (Array.isArray(writeErrors)) return writeErrors as Array<{ code?: number }>;
+  if (
+    typeof writeErrors === 'object'
+    && writeErrors !== null
+    && 'values' in writeErrors
+    && typeof (writeErrors as { values?: unknown }).values === 'function'
+  ) {
+    return Array.from((writeErrors as Map<unknown, { code?: number }>).values());
+  }
+  return [writeErrors as { code?: number }];
 }
