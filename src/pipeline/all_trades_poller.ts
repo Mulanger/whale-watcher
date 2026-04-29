@@ -85,6 +85,7 @@ export class AllTradesPoller {
           usdSize: usd,
           shares: t.size,
           priceCents: Math.round(t.price * 100),
+          priceMillicents: Math.round(t.price * 10_000),
           conditionId: t.conditionId,
           marketSlug: t.slug,
           category: null,

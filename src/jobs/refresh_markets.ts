@@ -19,14 +19,30 @@ export async function refreshActiveMarkets(
 
   const recent = await trades.aggregate([
     { $match: { timestamp: { $gte: cutoff } } },
-    { $group: { _id: '$market.conditionId' } },
+    { $sort: { timestamp: -1 } },
+    {
+      $group: {
+        _id: '$market.conditionId',
+        slug: { $first: '$market.slug' },
+        title: { $first: '$market.title' },
+        icon: { $first: '$market.icon' },
+        category: { $first: '$market.category' },
+        eventSlug: { $first: '$market.eventSlug' },
+        yesPriceCents: { $first: '$market.yesPriceCents' },
+        noPriceCents: { $first: '$market.noPriceCents' },
+      },
+    },
   ]).toArray();
 
   log.info({ count: recent.length }, 'Refreshing active markets');
 
-  for (const { _id: conditionId } of recent) {
+  for (const market of recent) {
+    const conditionId = market._id;
     try {
-      const m = await getMarket(conditionId);
+      const m = await getMarket(conditionId, {
+        slug: market.slug ?? undefined,
+        eventSlug: market.eventSlug ?? undefined,
+      });
       await markets.updateOne(
         { _id: conditionId },
         {
@@ -47,7 +63,26 @@ export async function refreshActiveMarkets(
         { upsert: true }
       );
     } catch (e) {
-      log.warn({ conditionId, err: e }, 'Market refresh failed');
+      await markets.updateOne(
+        { _id: conditionId },
+        {
+          $set: {
+            slug: market.slug,
+            title: market.title,
+            icon: market.icon ?? null,
+            category: market.category ?? null,
+            eventSlug: market.eventSlug ?? null,
+            yesPriceCents: market.yesPriceCents ?? null,
+            noPriceCents: market.noPriceCents ?? null,
+            volume24h: null,
+            liquidity: null,
+            isActive: false,
+            refreshedAt: new Date(),
+          },
+        },
+        { upsert: true }
+      );
+      log.debug({ conditionId, slug: market.slug, eventSlug: market.eventSlug, err: e }, 'Market refresh used stored trade metadata');
     }
     await sleep(150);
   }

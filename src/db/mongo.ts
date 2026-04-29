@@ -14,6 +14,7 @@ export interface EnrichedWhale {
   usdSize: number;
   shares: number;
   priceCents: number;
+  priceMillicents?: number;
   timestamp: number;
   ingestedAt: Date;
   market: {
@@ -55,6 +56,7 @@ export interface MarketDoc {
   _id: string;
   slug: string;
   title: string;
+  icon: string | null;
   category: string | null;
   eventSlug: string | null;
   endDate: Date | null;
@@ -87,6 +89,7 @@ export interface TradeEventDoc {
   usdSize: number;
   shares: number;
   priceCents: number;
+  priceMillicents?: number;
   conditionId: string;
   marketSlug: string;
   category: string | null;

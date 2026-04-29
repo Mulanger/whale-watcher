@@ -21,6 +21,7 @@ export async function enrich(trade: PolymarketTrade): Promise<EnrichedWhale> {
     usdSize: usd,
     shares: trade.size,
     priceCents: Math.round(trade.price * 100),
+    priceMillicents: Math.round(trade.price * 10_000),
     timestamp: trade.timestamp,
     ingestedAt: new Date(),
     market: {
