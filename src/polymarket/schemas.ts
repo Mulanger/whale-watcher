@@ -50,7 +50,7 @@ export const GammaEventSchema = z.object({
 
 export type GammaEvent = z.infer<typeof GammaEventSchema>;
 
-export const PositionsSchema = z.object({
+export const UserPositionsSchema = z.object({
   user: z.string(),
   positions: z.array(z.object({
     market: z.string(),
@@ -59,4 +59,20 @@ export const PositionsSchema = z.object({
   })).optional(),
 });
 
-export type Positions = z.infer<typeof PositionsSchema>;
+export type UserPositions = z.infer<typeof UserPositionsSchema>;
+
+export const PositionSchema = z.object({
+  proxyWallet: z.string(),
+  asset: z.string(),
+  conditionId: z.string(),
+  size: z.number(),
+  avgPrice: z.number(),
+  totalBought: z.number(),
+  realizedPnl: z.number(),
+  outcomeIndex: z.number(),
+  outcome: z.string(),
+});
+
+export type Position = z.infer<typeof PositionSchema>;
+
+export const PositionsResponseSchema = PositionSchema.array();

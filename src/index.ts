@@ -4,6 +4,8 @@ import { connectMongo, closeMongo, isMongoConnected } from './db/mongo.js';
 import { ensureIndexes } from './db/indexes.js';
 import { connectRedis, closeRedis, isRedisConnected, publishWhale } from './redis/publisher.js';
 import { TradesPoller } from './pipeline/trades_poller.js';
+import { pushPending } from './redis/pending_queue.js';
+import { runIntentWorker, stopIntentWorker } from './pipeline/intent_worker.js';
 import { startRefreshMarketsJob } from './jobs/refresh_markets.js';
 import { startRefreshTraderStatsJob } from './jobs/refresh_trader_stats.js';
 import { startHealthServer } from './http/health.js';
@@ -20,22 +22,33 @@ async function main(): Promise<void> {
 
   log.info('Starting whale-watcher...');
 
-  const { trades, markets, traders } = await connectMongo();
-  await ensureIndexes(trades, markets, traders);
+  const { trades, markets, traders, intentDiscards } = await connectMongo();
+  await ensureIndexes(trades, markets, traders, intentDiscards);
 
   await connectRedis();
 
-  poller = new TradesPoller(trades, async (whale) => {
+  poller = new TradesPoller(trades, async (whale, rawTrade) => {
+    if (config.intentClassificationEnabled) {
+      await pushPending(whale._id, {
+        rawTrade,
+        enrichedDoc: whale,
+        attempts: 0,
+      }, 60);
+      log.info({ id: whale._id, usd: whale.usdSize, tier: whale.tier }, 'whale queued for intent classification');
+      return;
+    }
+
     await publishWhale(whale);
-    log.info({
-      id: whale._id,
-      usd: whale.usdSize,
-      tier: whale.tier,
-      market: { slug: whale.market.slug },
-    }, 'whale');
+    log.info({ id: whale._id, usd: whale.usdSize, tier: whale.tier, market: { slug: whale.market.slug } }, 'whale');
   });
 
   await poller.start();
+
+  if (config.intentClassificationEnabled) {
+    void runIntentWorker({ trades, intentDiscards }).catch((err) => {
+      log.error({ err }, 'intent worker crashed');
+    });
+  }
 
   refreshMarketsInterval = startRefreshMarketsJob(trades, markets);
   refreshTradersInterval = startRefreshTraderStatsJob(trades, traders);
@@ -66,6 +79,7 @@ process.on('SIGTERM', async () => {
   log.info('Received SIGTERM, shutting down...');
 
   if (poller) await poller.stop();
+  stopIntentWorker();
 
   if (refreshMarketsInterval) clearInterval(refreshMarketsInterval);
   if (refreshTradersInterval) clearInterval(refreshTradersInterval);
@@ -85,6 +99,7 @@ process.on('SIGINT', async () => {
   log.info('Received SIGINT, shutting down...');
 
   if (poller) await poller.stop();
+  stopIntentWorker();
 
   if (refreshMarketsInterval) clearInterval(refreshMarketsInterval);
   if (refreshTradersInterval) clearInterval(refreshTradersInterval);

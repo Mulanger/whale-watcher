@@ -7,11 +7,13 @@ import {
   PolymarketTradeSchema,
   GammaMarketSchema,
   GammaEventSchema,
-  PositionsSchema,
+  UserPositionsSchema,
+  PositionsResponseSchema,
   type PolymarketTrade,
   type GammaMarket,
   type GammaEvent,
-  type Positions,
+  type UserPositions,
+  type Position,
 } from './schemas.js';
 
 const agent = new Agent({ keepAliveTimeout: 30_000, connections: 10 });
@@ -82,7 +84,20 @@ export async function getEvent(eventId: string): Promise<GammaEvent> {
   return get(config.polymarketGammaUrl, `/events/${eventId}`, {}, GammaEventSchema);
 }
 
-export async function getPositions(user: string): Promise<Positions> {
+export async function getUserPositions(user: string): Promise<UserPositions> {
   const config = loadConfig();
-  return get(config.polymarketDataUrl, '/positions', { user }, PositionsSchema);
+  return get(config.polymarketDataUrl, '/positions', { user }, UserPositionsSchema);
+}
+
+export async function getPositions(opts: {
+  user: string;
+  market: string;
+  sizeThreshold?: number;
+}): Promise<Position[]> {
+  const config = loadConfig();
+  return get(config.polymarketDataUrl, '/positions', {
+    user: opts.user,
+    market: opts.market,
+    sizeThreshold: opts.sizeThreshold ?? 0,
+  }, PositionsResponseSchema);
 }

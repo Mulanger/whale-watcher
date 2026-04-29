@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { classifyTier } from '../src/pipeline/tier_classifier.js';
 import { synthesizeTradeId } from '../src/pipeline/dedup.js';
+import { classifyIntent, shouldShowInFeed, TransientLagError } from '../src/pipeline/intent_classifier.js';
 
 describe('classifyTier', () => {
   it('returns mega for >= 250k', () => {
@@ -87,5 +88,64 @@ describe('synthesizeTradeId', () => {
     const trade2 = { ...trade1, asset: 'asset2' };
 
     expect(synthesizeTradeId(trade1)).not.toBe(synthesizeTradeId(trade2));
+  });
+});
+
+describe('classifyIntent', () => {
+  it('classifies BUY from zero as OPEN', () => {
+    const intent = classifyIntent(
+      { side: 'BUY', size: 100, asset: 'a1' },
+      { asset: 'a1', size: 100 }
+    );
+    expect(intent).toBe('OPEN');
+    expect(shouldShowInFeed(intent)).toBe(true);
+  });
+
+  it('classifies BUY with existing shares as INCREASE', () => {
+    const intent = classifyIntent(
+      { side: 'BUY', size: 100, asset: 'a1' },
+      { asset: 'a1', size: 150 }
+    );
+    expect(intent).toBe('INCREASE');
+    expect(shouldShowInFeed(intent)).toBe(true);
+  });
+
+  it('classifies SELL that leaves shares as DECREASE', () => {
+    const intent = classifyIntent(
+      { side: 'SELL', size: 100, asset: 'a1' },
+      { asset: 'a1', size: 30 }
+    );
+    expect(intent).toBe('DECREASE');
+    expect(shouldShowInFeed(intent)).toBe(false);
+  });
+
+  it('classifies SELL to zero as CLOSE', () => {
+    const intent = classifyIntent(
+      { side: 'SELL', size: 100, asset: 'a1' },
+      { asset: 'a1', size: 0 }
+    );
+    expect(intent).toBe('CLOSE');
+    expect(shouldShowInFeed(intent)).toBe(false);
+  });
+
+  it('treats exact zero boundaries as OPEN/CLOSE', () => {
+    const openIntent = classifyIntent(
+      { side: 'BUY', size: 50, asset: 'a1' },
+      { asset: 'a1', size: 50 }
+    );
+    expect(openIntent).toBe('OPEN');
+
+    const closeIntent = classifyIntent(
+      { side: 'SELL', size: 50, asset: 'a1' },
+      { asset: 'a1', size: 0 }
+    );
+    expect(closeIntent).toBe('CLOSE');
+  });
+
+  it('throws TransientLagError for impossible negative pre-trade shares', () => {
+    expect(() => classifyIntent(
+      { side: 'BUY', size: 100, asset: 'a1' },
+      { asset: 'a1', size: 80 }
+    )).toThrow(TransientLagError);
   });
 });

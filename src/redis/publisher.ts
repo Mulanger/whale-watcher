@@ -13,12 +13,19 @@ export async function connectRedis(): Promise<Redis> {
   log.info('Connecting to Redis...');
   _redis = new Redis(config.redisUrl, {
     lazyConnect: true,
+    maxRetriesPerRequest: null,
+    enableReadyCheck: false,
+    reconnectOnError: () => true,
   });
 
   await _redis.connect();
   log.info('Redis connected');
 
   return _redis;
+}
+
+export async function getRedis(): Promise<Redis> {
+  return connectRedis();
 }
 
 export async function publishWhale(whale: unknown): Promise<void> {

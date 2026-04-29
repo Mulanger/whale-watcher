@@ -12,6 +12,7 @@ const ConfigSchema = z.object({
   mongoDb: z.string(),
   redisUrl: z.string(),
   redisChannel: z.string(),
+  intentClassificationEnabled: z.boolean(),
   healthPort: z.number().int().positive(),
 });
 
@@ -34,6 +35,7 @@ export function loadConfig(): Config {
     mongoDb: process.env['MONGO_DB'] ?? 'polywatch',
     redisUrl: process.env['REDIS_URL'] ?? 'redis://localhost:6379',
     redisChannel: process.env['REDIS_CHANNEL'] ?? 'whales',
+    intentClassificationEnabled: (process.env['INTENT_CLASSIFICATION_ENABLED'] ?? 'false') === 'true',
     healthPort: parseInt(process.env['HEALTH_PORT'] ?? '8080', 10),
   };
 

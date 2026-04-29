@@ -30,7 +30,7 @@ export class TradesPoller {
 
   constructor(
     private tradesCollection: Collection<EnrichedWhale>,
-    private onWhale: (whale: EnrichedWhale) => Promise<void>
+    private onWhale: (whale: EnrichedWhale, rawTrade: PolymarketTrade) => Promise<void>
   ) {}
 
   getState(): PollerState {
@@ -69,7 +69,7 @@ export class TradesPoller {
       this.state.lastPollAt = now;
       this.state.lastError = null;
 
-      const newTrades: EnrichedWhale[] = [];
+      const newTrades: Array<{ whale: EnrichedWhale; rawTrade: PolymarketTrade }> = [];
 
       for (const t of rawTrades) {
         const id = synthesizeTradeId(t);
@@ -79,7 +79,7 @@ export class TradesPoller {
         if (usd < this.config.whaleUsdFloor) continue;
 
         const enriched = await enrich(t);
-        newTrades.push(enriched);
+        newTrades.push({ whale: enriched, rawTrade: t });
         this.addToSeen(id);
       }
 
@@ -88,7 +88,7 @@ export class TradesPoller {
       }
 
       const biggest = newTrades.length > 0
-        ? Math.max(...newTrades.map(w => w.usdSize))
+        ? Math.max(...newTrades.map((w) => w.whale.usdSize))
         : 0;
       const tier = biggest >= 250_000 ? 'mega'
         : biggest >= 100_000 ? 'large'
@@ -109,16 +109,25 @@ export class TradesPoller {
     }
   }
 
-  private async insertWhales(whales: EnrichedWhale[]): Promise<void> {
+  private async insertWhales(items: Array<{ whale: EnrichedWhale; rawTrade: PolymarketTrade }>): Promise<void> {
+    if (this.config.intentClassificationEnabled) {
+      for (const item of items) {
+        await this.onWhale(item.whale, item.rawTrade);
+      }
+      this.state.tradesIngestedTotal += items.length;
+      return;
+    }
+
     try {
+      const whales = items.map((item) => item.whale);
       await this.tradesCollection.bulkWrite(
         whales.map(w => ({ insertOne: { document: w } })),
         { ordered: false }
       );
       this.state.tradesIngestedTotal += whales.length;
 
-      for (const whale of whales) {
-        await this.onWhale(whale);
+      for (const item of items) {
+        await this.onWhale(item.whale, item.rawTrade);
       }
     } catch (err) {
       if (err instanceof MongoBulkWriteError) {

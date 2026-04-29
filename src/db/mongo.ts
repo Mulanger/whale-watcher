@@ -7,6 +7,7 @@ let _db: Database | null = null;
 
 export interface EnrichedWhale {
   _id: string;
+  intent?: 'OPEN' | 'INCREASE';
   tier: WhaleTier;
   side: 'BUY' | 'SELL';
   outcome: 'YES' | 'NO';
@@ -37,6 +38,17 @@ export interface EnrichedWhale {
   };
   transactionHash: string;
   raw: unknown;
+}
+
+export interface IntentDiscardDoc {
+  _id: string;
+  wallet: string;
+  conditionId: string;
+  intent: 'DECREASE' | 'CLOSE';
+  side: 'BUY' | 'SELL';
+  usdSize: number;
+  timestamp: number;
+  discardedAt: Date;
 }
 
 export interface MarketDoc {
@@ -74,6 +86,7 @@ export async function connectMongo(): Promise<{
   trades: Collection<EnrichedWhale>;
   markets: Collection<MarketDoc>;
   traders: Collection<TraderDoc>;
+  intentDiscards: Collection<IntentDiscardDoc>;
 }> {
   const config = loadConfig();
   const log = getLogger();
@@ -85,6 +98,7 @@ export async function connectMongo(): Promise<{
       trades: _db.collection<EnrichedWhale>('trades'),
       markets: _db.collection<MarketDoc>('markets'),
       traders: _db.collection<TraderDoc>('traders'),
+      intentDiscards: _db.collection<IntentDiscardDoc>('intent_discards'),
     };
   }
 
@@ -101,6 +115,7 @@ export async function connectMongo(): Promise<{
     trades: _db.collection<EnrichedWhale>('trades'),
     markets: _db.collection<MarketDoc>('markets'),
     traders: _db.collection<TraderDoc>('traders'),
+    intentDiscards: _db.collection<IntentDiscardDoc>('intent_discards'),
   };
 }
 

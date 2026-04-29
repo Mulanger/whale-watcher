@@ -1,6 +1,6 @@
 import type { Collection } from 'mongodb';
 import { getLogger } from '../logger.js';
-import { getPositions } from '../polymarket/client.js';
+import { getUserPositions } from '../polymarket/client.js';
 import type { EnrichedWhale, TraderDoc } from '../db/mongo.js';
 
 function sleep(ms: number): Promise<void> {
@@ -24,7 +24,7 @@ export async function refreshTraderStats(
 
   for (const { _id: proxyWallet } of recentTraders) {
     try {
-      const positions = await getPositions(proxyWallet);
+      const positions = await getUserPositions(proxyWallet);
 
       let vol30d = 0;
       let tradeCount = 0;

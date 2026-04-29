@@ -2,7 +2,8 @@ export type {
   PolymarketTrade,
   GammaMarket,
   GammaEvent,
-  Positions,
+  UserPositions,
+  Position,
 } from './schemas.js';
 
 export type { WhaleTier } from '../db/mongo.js';
