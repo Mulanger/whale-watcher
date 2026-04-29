@@ -1,6 +1,7 @@
 import { request, Agent } from 'undici';
 import { z } from 'zod';
 import pRetry from 'p-retry';
+import { AbortError } from 'p-retry';
 import { loadConfig } from '../config.js';
 import { getLogger } from '../logger.js';
 import {
@@ -38,7 +39,7 @@ async function get<T>(
         throw new RetriableError(`status ${res.statusCode}`);
       }
       if (res.statusCode >= 400) {
-        throw new Error(`status ${res.statusCode}: ${await res.body.text()}`);
+        throw new AbortError(`status ${res.statusCode}: ${await res.body.text()}`);
       }
       const json = await res.body.json();
       return schema.parse(json);
