@@ -75,19 +75,58 @@ export async function getTrades(params: {
   return result;
 }
 
-export async function getMarket(conditionId: string): Promise<GammaMarket> {
+export async function getMarket(
+  conditionId: string,
+  opts: { slug?: string; eventSlug?: string } = {}
+): Promise<GammaMarket> {
   const config = loadConfig();
-  const markets = await get(
+  const marketsByCondition = await get(
     config.polymarketGammaUrl,
     '/markets',
     { condition_ids: conditionId },
     GammaMarketSchema.array()
   );
-  const exactMatch = markets.find((market) => market.conditionId.toLowerCase() === conditionId.toLowerCase());
-  if (!exactMatch) {
-    throw new AbortError(`market not found for conditionId ${conditionId}`);
+  const exactConditionMatch = marketsByCondition.find(
+    (market) => market.conditionId.toLowerCase() === conditionId.toLowerCase()
+  );
+  if (exactConditionMatch) return exactConditionMatch;
+
+  if (opts.slug) {
+    const marketsBySlug = await get(
+      config.polymarketGammaUrl,
+      '/markets',
+      { slug: opts.slug },
+      GammaMarketSchema.array()
+    );
+    const exactSlugMatch = marketsBySlug.find(
+      (market) =>
+        market.conditionId.toLowerCase() === conditionId.toLowerCase()
+        || market.slug === opts.slug
+    );
+    if (exactSlugMatch) return exactSlugMatch;
   }
-  return exactMatch;
+
+  if (opts.eventSlug) {
+    const events = await get(
+      config.polymarketGammaUrl,
+      '/events',
+      { slug: opts.eventSlug },
+      GammaEventSchema.array()
+    );
+    const event = events.find((e) => e.slug === opts.eventSlug) ?? events[0];
+    const nestedMatch = event?.markets.find(
+      (market) =>
+        market.conditionId.toLowerCase() === conditionId.toLowerCase()
+        || (opts.slug != null && market.slug === opts.slug)
+    );
+    if (nestedMatch) return nestedMatch;
+  }
+
+  throw new AbortError(
+    `market not found for conditionId ${conditionId}`
+    + (opts.slug ? ` slug ${opts.slug}` : '')
+    + (opts.eventSlug ? ` eventSlug ${opts.eventSlug}` : '')
+  );
 }
 
 export async function getEvent(eventId: string): Promise<GammaEvent> {

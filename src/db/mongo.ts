@@ -10,7 +10,7 @@ export interface EnrichedWhale {
   intent?: 'OPEN' | 'INCREASE';
   tier: WhaleTier;
   side: 'BUY' | 'SELL';
-  outcome: 'YES' | 'NO';
+  outcome: string;
   usdSize: number;
   shares: number;
   priceCents: number;
@@ -83,7 +83,7 @@ export interface TradeEventDoc {
   proxyWallet: string;
   pseudonym: string | null;
   side: 'BUY' | 'SELL';
-  outcome: 'YES' | 'NO';
+  outcome: string;
   usdSize: number;
   shares: number;
   priceCents: number;

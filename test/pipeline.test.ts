@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { classifyTier } from '../src/pipeline/tier_classifier.js';
 import { synthesizeTradeId } from '../src/pipeline/dedup.js';
 import { classifyIntent, shouldShowInFeed, TransientLagError } from '../src/pipeline/intent_classifier.js';
+import { normalizeOutcome } from '../src/pipeline/outcome.js';
 
 describe('classifyTier', () => {
   it('returns mega for >= 250k', () => {
@@ -88,6 +89,14 @@ describe('synthesizeTradeId', () => {
     const trade2 = { ...trade1, asset: 'asset2' };
 
     expect(synthesizeTradeId(trade1)).not.toBe(synthesizeTradeId(trade2));
+  });
+});
+
+describe('normalizeOutcome', () => {
+  it('normalizes binary outcomes and preserves sports labels', () => {
+    expect(normalizeOutcome('Yes')).toBe('YES');
+    expect(normalizeOutcome('no')).toBe('NO');
+    expect(normalizeOutcome('Oilers')).toBe('Oilers');
   });
 });
 

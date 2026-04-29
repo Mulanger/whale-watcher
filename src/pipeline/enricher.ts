@@ -4,38 +4,20 @@ import type { PolymarketTrade, GammaMarket } from '../polymarket/types.js';
 import type { EnrichedWhale } from '../db/mongo.js';
 import { classifyTier } from './tier_classifier.js';
 import { synthesizeTradeId } from './dedup.js';
+import { normalizeOutcome } from './outcome.js';
 
 const marketCache = new Map<string, { data: GammaMarket | null; expiresAt: number }>();
 const CACHE_TTL_MS = 60 * 60 * 1000;
 
-async function getCachedMarketMeta(conditionId: string): Promise<GammaMarket | null> {
-  const now = Date.now();
-  const cached = marketCache.get(conditionId);
-
-  if (cached && cached.expiresAt > now) {
-    return cached.data;
-  }
-
-  try {
-    const meta = await getMarket(conditionId);
-    marketCache.set(conditionId, { data: meta, expiresAt: now + CACHE_TTL_MS });
-    return meta;
-  } catch (e) {
-    getLogger().warn({ conditionId, err: e }, 'Failed to fetch market meta');
-    marketCache.set(conditionId, { data: null, expiresAt: now + CACHE_TTL_MS });
-    return null;
-  }
-}
-
 export async function enrich(trade: PolymarketTrade): Promise<EnrichedWhale> {
   const usd = trade.size * trade.price;
-  const marketMeta = await getCachedMarketMeta(trade.conditionId);
+  const marketMeta = await getCachedMarketMetaForTrade(trade);
 
   return {
     _id: synthesizeTradeId(trade),
     tier: classifyTier(usd),
     side: trade.side,
-    outcome: trade.outcome.toUpperCase() as 'YES' | 'NO',
+    outcome: normalizeOutcome(trade.outcome),
     usdSize: usd,
     shares: trade.size,
     priceCents: Math.round(trade.price * 100),
@@ -64,4 +46,32 @@ export async function enrich(trade: PolymarketTrade): Promise<EnrichedWhale> {
     transactionHash: trade.transactionHash,
     raw: trade,
   };
+}
+
+async function getCachedMarketMetaForTrade(trade: PolymarketTrade): Promise<GammaMarket | null> {
+  const now = Date.now();
+  const cacheKey = `${trade.conditionId}:${trade.slug}:${trade.eventSlug}`;
+  const cached = marketCache.get(cacheKey);
+
+  if (cached && cached.expiresAt > now) {
+    return cached.data;
+  }
+
+  try {
+    const meta = await getMarket(trade.conditionId, {
+      slug: trade.slug,
+      eventSlug: trade.eventSlug || undefined,
+    });
+    marketCache.set(cacheKey, { data: meta, expiresAt: now + CACHE_TTL_MS });
+    return meta;
+  } catch (e) {
+    getLogger().warn({
+      conditionId: trade.conditionId,
+      slug: trade.slug,
+      eventSlug: trade.eventSlug,
+      err: e,
+    }, 'Failed to fetch market meta');
+    marketCache.set(cacheKey, { data: null, expiresAt: now + CACHE_TTL_MS });
+    return null;
+  }
 }

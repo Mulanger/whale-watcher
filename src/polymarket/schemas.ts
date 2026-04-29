@@ -84,11 +84,25 @@ export const GammaMarketSchema = z.object({
 export type GammaMarket = z.infer<typeof GammaMarketSchema>;
 
 export const GammaEventSchema = z.object({
-  eventId: z.string(),
+  id: z.union([z.string(), z.number()]).optional(),
+  eventId: z.union([z.string(), z.number()]).optional(),
+  slug: z.string().optional(),
   title: z.string(),
-  category: z.string().nullable(),
-  endDate: z.string().nullable(),
-});
+  category: z.string().nullable().optional(),
+  endDate: z.string().nullable().optional(),
+  markets: z.array(GammaMarketSchema).optional(),
+  tags: z.array(z.object({
+    label: z.string().optional(),
+    slug: z.string().optional(),
+  }).passthrough()).optional(),
+}).passthrough().transform((event) => ({
+  eventId: String(event.eventId ?? event.id ?? ''),
+  slug: event.slug ?? null,
+  title: event.title,
+  category: event.category ?? event.tags?.[0]?.label ?? null,
+  endDate: event.endDate ?? null,
+  markets: event.markets ?? [],
+}));
 
 export type GammaEvent = z.infer<typeof GammaEventSchema>;
 

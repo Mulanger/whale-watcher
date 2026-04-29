@@ -3,6 +3,7 @@ import { loadConfig } from '../config.js';
 import { getLogger } from '../logger.js';
 import { getTrades } from '../polymarket/client.js';
 import { synthesizeTradeId } from './dedup.js';
+import { normalizeOutcome } from './outcome.js';
 import type { TradeEventDoc } from '../db/mongo.js';
 
 const SEEN_SET_MAX_SIZE = 200_000;
@@ -80,7 +81,7 @@ export class AllTradesPoller {
           proxyWallet: t.proxyWallet.toLowerCase(),
           pseudonym: t.pseudonym ?? null,
           side: t.side,
-          outcome: t.outcome.toUpperCase() === 'NO' ? 'NO' : 'YES',
+          outcome: normalizeOutcome(t.outcome),
           usdSize: usd,
           shares: t.size,
           priceCents: Math.round(t.price * 100),
