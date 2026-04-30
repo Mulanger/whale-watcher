@@ -1,4 +1,19 @@
 import { createServer } from 'node:http';
+import type { SourceTradeSnapshot } from '../pipeline/source_trade.js';
+
+export interface SourceTradeHealthStatus {
+  floor: number;
+  latestSourceTrade: SourceTradeSnapshot | null;
+  latestSourceTradeAge: number;
+  staleAfterMs: number;
+  stale: boolean;
+}
+
+export interface UpstreamHealthStatus {
+  ok: boolean;
+  dataApiWhales: SourceTradeHealthStatus;
+  dataApiTradeEvents?: SourceTradeHealthStatus;
+}
 
 export interface LeaderboardHealthStatus {
   enabled: boolean;
@@ -32,6 +47,7 @@ export interface HealthStatus {
   lastPollAge: number;
   tradesIngestedTotal: number;
   lastError: string | null;
+  upstream?: UpstreamHealthStatus;
   leaderboard?: LeaderboardHealthStatus;
 }
 
@@ -57,6 +73,7 @@ export function startHealthServer(
         lastPollAge,
         tradesIngestedTotal: h.tradesIngestedTotal,
         lastError: h.lastError,
+        upstream: h.upstream,
         leaderboard: h.leaderboard,
       }));
     } else {

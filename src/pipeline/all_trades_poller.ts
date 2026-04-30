@@ -4,6 +4,7 @@ import { getLogger } from '../logger.js';
 import { getTrades } from '../polymarket/client.js';
 import { synthesizeTradeId } from './dedup.js';
 import { normalizeOutcome } from './outcome.js';
+import { snapshotSourceTrade, sourceTradeAgeMs, type SourceTradeSnapshot } from './source_trade.js';
 import type { TradeEventDoc } from '../db/mongo.js';
 import type { PolymarketTrade } from '../polymarket/types.js';
 
@@ -17,6 +18,7 @@ export interface AllTradesPollerState {
   lastInserted: number;
   lastDuplicateSkipped: number;
   skippedOverlappingPolls: number;
+  latestSourceTrade: SourceTradeSnapshot | null;
 }
 
 export class AllTradesPoller {
@@ -28,6 +30,7 @@ export class AllTradesPoller {
   private running = false;
   private pollInProgress = false;
   private intervalId: ReturnType<typeof setInterval> | null = null;
+  private lastStaleWarningAt = 0;
   private state: AllTradesPollerState = {
     tradeEventsIngestedTotal: 0,
     lastPollAt: null,
@@ -36,6 +39,7 @@ export class AllTradesPoller {
     lastInserted: 0,
     lastDuplicateSkipped: 0,
     skippedOverlappingPolls: 0,
+    latestSourceTrade: null,
   };
 
   constructor(
@@ -89,6 +93,9 @@ export class AllTradesPoller {
         filterType: 'CASH',
         filterAmount: this.config.tradeEventsUsdFloor,
       });
+      const latestSourceTrade = rawTrades[0] ? snapshotSourceTrade(rawTrades[0]) : null;
+      this.state.latestSourceTrade = latestSourceTrade;
+      this.warnIfSourceStale(latestSourceTrade);
 
       const candidates: TradeEventDoc[] = [];
       const idsInPoll = new Set<string>();
@@ -137,6 +144,8 @@ export class AllTradesPoller {
         attempted: candidates.length,
         inserted,
         duplicateSkipped,
+        latestSourceTradeAt: latestSourceTrade?.timestamp ?? null,
+        latestSourceTradeAgeMs: sourceTradeAgeMs(latestSourceTrade),
       }, 'all_trades poll complete');
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -198,6 +207,25 @@ export class AllTradesPoller {
       this.seenIds = new Set(arr.slice(Math.floor(arr.length / 2)));
     }
     this.seenIds.add(id);
+  }
+
+  private warnIfSourceStale(latestSourceTrade: SourceTradeSnapshot | null): void {
+    if (this.config.nodeEnv === 'test') return;
+
+    const ageMs = sourceTradeAgeMs(latestSourceTrade);
+    if (ageMs <= this.config.dataApiStaleAfterMs) return;
+
+    const now = Date.now();
+    const warnIntervalMs = Math.min(this.config.dataApiStaleAfterMs, 5 * 60_000);
+    if (now - this.lastStaleWarningAt < warnIntervalMs) return;
+
+    this.lastStaleWarningAt = now;
+    this.log.warn({
+      latestSourceTrade,
+      latestSourceTradeAgeMs: ageMs,
+      staleAfterMs: this.config.dataApiStaleAfterMs,
+      floor: this.config.tradeEventsUsdFloor,
+    }, 'Polymarket data-api trade-events feed is stale');
   }
 }
 

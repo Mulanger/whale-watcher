@@ -11,6 +11,7 @@ import { startRefreshMarketsJob } from './jobs/refresh_markets.js';
 import { startRefreshTraderStatsJob } from './jobs/refresh_trader_stats.js';
 import { startDailyAggregator, type DailyAggregatorHandle } from './jobs/aggregate_daily_stats.js';
 import { startHealthServer } from './http/health.js';
+import { sourceTradeAgeMs, type SourceTradeSnapshot } from './pipeline/source_trade.js';
 
 let shuttingDown = false;
 let poller: TradesPoller | null = null;
@@ -75,7 +76,23 @@ async function main(): Promise<void> {
       tradesIngestedTotal: 0,
       lastPollAt: null,
       lastError: null,
+      latestSourceTrade: null,
     };
+    const allTradesState = allTradesPoller?.getState() ?? null;
+    const dataApiWhales = getSourceTradeHealth(
+      state.latestSourceTrade,
+      config.whaleUsdFloor,
+      config.dataApiStaleAfterMs
+    );
+    const dataApiTradeEvents = config.tradeEventsEnabled
+      ? getSourceTradeHealth(
+        allTradesState?.latestSourceTrade ?? null,
+        config.tradeEventsUsdFloor,
+        config.dataApiStaleAfterMs
+      )
+      : undefined;
+    const upstreamOk = !dataApiWhales.stale && !(dataApiTradeEvents?.stale ?? false);
+
     return {
       mongoConnected: isMongoConnected(),
       redisConnected: isRedisConnected(),
@@ -83,6 +100,11 @@ async function main(): Promise<void> {
       lastPollAge: state.lastPollAt ? Date.now() - state.lastPollAt : Infinity,
       tradesIngestedTotal: state.tradesIngestedTotal,
       lastError: state.lastError,
+      upstream: {
+        ok: upstreamOk,
+        dataApiWhales,
+        dataApiTradeEvents,
+      },
       leaderboard: getLeaderboardHealth(config, allTradesPoller, dailyAggregator),
     };
   });
@@ -184,5 +206,20 @@ function getLeaderboardHealth(
       running: dailyAggregatorState?.running ?? false,
       staleAfterMs: dailyAggregatorStaleAfterMs,
     },
+  };
+}
+
+function getSourceTradeHealth(
+  latestSourceTrade: SourceTradeSnapshot | null,
+  floor: number,
+  staleAfterMs: number
+) {
+  const latestSourceTradeAge = sourceTradeAgeMs(latestSourceTrade);
+  return {
+    floor,
+    latestSourceTrade,
+    latestSourceTradeAge,
+    staleAfterMs,
+    stale: latestSourceTradeAge > staleAfterMs,
   };
 }

@@ -3,6 +3,7 @@ import { getLogger } from '../logger.js';
 import { getTrades } from '../polymarket/client.js';
 import { enrich } from './enricher.js';
 import { synthesizeTradeId } from './dedup.js';
+import { snapshotSourceTrade, sourceTradeAgeMs, type SourceTradeSnapshot } from './source_trade.js';
 import type { Collection } from 'mongodb';
 import type { EnrichedWhale, WhaleTier } from '../db/mongo.js';
 import type { PolymarketTrade } from '../polymarket/types.js';
@@ -13,6 +14,7 @@ export interface PollerState {
   tradesIngestedTotal: number;
   lastPollAt: number | null;
   lastError: string | null;
+  latestSourceTrade: SourceTradeSnapshot | null;
 }
 
 export class TradesPoller {
@@ -21,10 +23,12 @@ export class TradesPoller {
   private log = getLogger();
   private running = false;
   private intervalId: ReturnType<typeof setInterval> | null = null;
+  private lastStaleWarningAt = 0;
   private state: PollerState = {
     tradesIngestedTotal: 0,
     lastPollAt: null,
     lastError: null,
+    latestSourceTrade: null,
   };
 
   constructor(
@@ -64,9 +68,12 @@ export class TradesPoller {
         filterType: 'CASH',
         filterAmount: this.config.whaleUsdFloor,
       });
+      const latestSourceTrade = rawTrades[0] ? snapshotSourceTrade(rawTrades[0]) : null;
 
       this.state.lastPollAt = now;
       this.state.lastError = null;
+      this.state.latestSourceTrade = latestSourceTrade;
+      this.warnIfSourceStale(latestSourceTrade);
 
       const candidates: Array<{ id: string; rawTrade: PolymarketTrade }> = [];
       const idsInPoll = new Set<string>();
@@ -112,9 +119,12 @@ export class TradesPoller {
         : 'sub';
 
       this.log.info({
+        fetched: rawTrades.length,
         count: newTrades.length,
         biggestUsd: biggest,
         tier,
+        latestSourceTradeAt: latestSourceTrade?.timestamp ?? null,
+        latestSourceTradeAgeMs: sourceTradeAgeMs(latestSourceTrade),
       }, 'Poll complete');
 
     } catch (err) {
@@ -169,6 +179,25 @@ export class TradesPoller {
       this.seenIds = new Set(arr.slice(Math.floor(arr.length / 2)));
     }
     this.seenIds.add(id);
+  }
+
+  private warnIfSourceStale(latestSourceTrade: SourceTradeSnapshot | null): void {
+    if (this.config.nodeEnv === 'test') return;
+
+    const ageMs = sourceTradeAgeMs(latestSourceTrade);
+    if (ageMs <= this.config.dataApiStaleAfterMs) return;
+
+    const now = Date.now();
+    const warnIntervalMs = Math.min(this.config.dataApiStaleAfterMs, 5 * 60_000);
+    if (now - this.lastStaleWarningAt < warnIntervalMs) return;
+
+    this.lastStaleWarningAt = now;
+    this.log.warn({
+      latestSourceTrade,
+      latestSourceTradeAgeMs: ageMs,
+      staleAfterMs: this.config.dataApiStaleAfterMs,
+      floor: this.config.whaleUsdFloor,
+    }, 'Polymarket data-api whale trade feed is stale');
   }
 }
 
