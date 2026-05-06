@@ -71,11 +71,7 @@ export async function ensureIndexes(
   ]);
 
   await marketPageSnapshots.createIndexes([
-    {
-      key: { slug: 1 },
-      unique: true,
-      partialFilterExpression: { slug: { $type: 'string' } },
-    },
+    { key: { slug: 1 }, unique: true, name: 'slug_1' },
     { key: { indexable: 1, 'stats.whaleVolume': -1 } },
     { key: { 'stats.latestTradeTs': -1 } },
     { key: { refreshedAt: 1 } },
