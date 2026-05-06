@@ -1,7 +1,7 @@
 import type { AnyBulkWriteOperation, Collection } from 'mongodb';
 import { loadConfig } from '../config.js';
 import { getLogger } from '../logger.js';
-import type { EnrichedWhale, TradeEventDoc, TraderDailyStatsDoc } from '../db/mongo.js';
+import type { EnrichedWhale, TraderDailyStatsDoc } from '../db/mongo.js';
 
 const SECONDS_PER_DAY = 24 * 60 * 60;
 
@@ -34,7 +34,6 @@ async function flushOps(
 }
 
 export async function aggregateDay(
-  tradeEvents: Collection<TradeEventDoc>,
   traderDailyStats: Collection<TraderDailyStatsDoc>,
   trades: Collection<EnrichedWhale>,
   dayUtc: string
@@ -44,42 +43,26 @@ export async function aggregateDay(
   const dayEnd = dayStart + SECONDS_PER_DAY;
   const runStartedAt = new Date();
 
-  const feedWhaleCounts = await trades.aggregate<{
-    _id: string;
-    whaleCount: number;
-  }>([
-    { $match: { timestamp: { $gte: dayStart, $lt: dayEnd } } },
-    {
-      $group: {
-        _id: { $toLower: '$trader.proxyWallet' },
-        whaleCount: { $sum: 1 },
-      },
-    },
-  ]).toArray();
-  const whaleCountByWallet = new Map(
-    feedWhaleCounts
-      .filter((doc) => typeof doc._id === 'string' && doc._id.length > 0)
-      .map((doc) => [doc._id, doc.whaleCount])
-  );
-
-  const cursor = tradeEvents.aggregate<{
+  const cursor = trades.aggregate<{
     _id: string;
     pseudonym: string | null;
     volume: number;
     tradeCount: number;
     buyVolume: number;
     sellVolume: number;
+    whaleCount: number;
   }>([
     { $match: { timestamp: { $gte: dayStart, $lt: dayEnd } } },
     { $sort: { timestamp: 1 } },
     {
       $group: {
-        _id: '$proxyWallet',
-        pseudonym: { $last: '$pseudonym' },
+        _id: { $toLower: '$trader.proxyWallet' },
+        pseudonym: { $last: '$trader.pseudonym' },
         volume: { $sum: '$usdSize' },
         tradeCount: { $sum: 1 },
         buyVolume: { $sum: { $cond: [{ $eq: ['$side', 'BUY'] }, '$usdSize', 0] } },
         sellVolume: { $sum: { $cond: [{ $eq: ['$side', 'SELL'] }, '$usdSize', 0] } },
+        whaleCount: { $sum: 1 },
       },
     },
   ], { allowDiskUse: true });
@@ -99,7 +82,7 @@ export async function aggregateDay(
             tradeCount: doc.tradeCount,
             buyVolume: doc.buyVolume,
             sellVolume: doc.sellVolume,
-            whaleCount: whaleCountByWallet.get(doc._id) ?? 0,
+            whaleCount: doc.whaleCount,
             updatedAt: runStartedAt,
           },
         },
@@ -137,7 +120,6 @@ export interface DailyAggregatorHandle {
 }
 
 export function startDailyAggregator(
-  tradeEvents: Collection<TradeEventDoc>,
   traderDailyStats: Collection<TraderDailyStatsDoc>,
   trades: Collection<EnrichedWhale>
 ): DailyAggregatorHandle {
@@ -161,8 +143,8 @@ export function startDailyAggregator(
     const today = getTodayUtc();
     const yesterday = getYesterdayUtc();
     try {
-      const yesterdayRows = await aggregateDay(tradeEvents, traderDailyStats, trades, yesterday);
-      const todayRows = await aggregateDay(tradeEvents, traderDailyStats, trades, today);
+      const yesterdayRows = await aggregateDay(traderDailyStats, trades, yesterday);
+      const todayRows = await aggregateDay(traderDailyStats, trades, today);
       state.lastRunAt = Date.now();
       state.lastError = null;
       state.lastRowsUpdated = yesterdayRows + todayRows;

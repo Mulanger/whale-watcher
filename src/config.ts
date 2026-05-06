@@ -19,6 +19,12 @@ const ConfigSchema = z.object({
   allTradesIntervalMs: z.number().int().positive(),
   tradeEventsPageLimit: z.number().int().positive().max(10000),
   dailyAggregatorIntervalMs: z.number().int().positive(),
+  marketPagesEnabled: z.boolean(),
+  marketPagesIntervalMs: z.number().int().positive(),
+  marketPagesLookbackDays: z.number().int().positive(),
+  marketPagesMinTrades: z.number().int().positive(),
+  marketPagesMinVolumeUsd: z.number().positive(),
+  marketPagesPruneAfterDays: z.number().int().positive(),
   healthPort: z.number().int().positive(),
 });
 
@@ -44,10 +50,16 @@ export function loadConfig(): Config {
     redisChannel: process.env['REDIS_CHANNEL'] ?? 'whales',
     intentClassificationEnabled: (process.env['INTENT_CLASSIFICATION_ENABLED'] ?? 'false') === 'true',
     tradeEventsEnabled: (process.env['TRADE_EVENTS_ENABLED'] ?? 'false') === 'true',
-    tradeEventsUsdFloor: parseFloat(process.env['TRADE_EVENTS_USD_FLOOR'] ?? '1000'),
+    tradeEventsUsdFloor: parseFloat(process.env['TRADE_EVENTS_USD_FLOOR'] ?? '10000'),
     allTradesIntervalMs: parseInt(process.env['ALL_TRADES_INTERVAL_MS'] ?? '30000', 10),
     tradeEventsPageLimit: parseInt(process.env['TRADE_EVENTS_PAGE_LIMIT'] ?? '1000', 10),
     dailyAggregatorIntervalMs: parseInt(process.env['DAILY_AGGREGATOR_INTERVAL_MS'] ?? '300000', 10),
+    marketPagesEnabled: (process.env['MARKET_PAGES_ENABLED'] ?? 'true') === 'true',
+    marketPagesIntervalMs: parseInt(process.env['MARKET_PAGES_INTERVAL_MS'] ?? '300000', 10),
+    marketPagesLookbackDays: parseInt(process.env['MARKET_PAGES_LOOKBACK_DAYS'] ?? '90', 10),
+    marketPagesMinTrades: parseInt(process.env['MARKET_PAGES_MIN_TRADES'] ?? '3', 10),
+    marketPagesMinVolumeUsd: parseFloat(process.env['MARKET_PAGES_MIN_VOLUME_USD'] ?? '50000'),
+    marketPagesPruneAfterDays: parseInt(process.env['MARKET_PAGES_PRUNE_AFTER_DAYS'] ?? '120', 10),
     healthPort: parseInt(process.env['HEALTH_PORT'] ?? '8080', 10),
   };
 

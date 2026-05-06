@@ -6,6 +6,7 @@ import type {
   IntentDiscardDoc,
   TradeEventDoc,
   TraderDailyStatsDoc,
+  MarketPageSnapshotDoc,
 } from './mongo.js';
 import { getLogger } from '../logger.js';
 
@@ -15,7 +16,8 @@ export async function ensureIndexes(
   traders: Collection<TraderDoc>,
   intentDiscards: Collection<IntentDiscardDoc>,
   tradeEvents: Collection<TradeEventDoc>,
-  traderDailyStats: Collection<TraderDailyStatsDoc>
+  traderDailyStats: Collection<TraderDailyStatsDoc>,
+  marketPageSnapshots: Collection<MarketPageSnapshotDoc>
 ): Promise<void> {
   const log = getLogger();
 
@@ -66,6 +68,14 @@ export async function ensureIndexes(
   await traderDailyStats.createIndexes([
     { key: { date: 1, volume: -1 } },
     { key: { proxyWallet: 1, date: -1 } },
+  ]);
+
+  await marketPageSnapshots.createIndexes([
+    { key: { slug: 1 }, unique: true },
+    { key: { indexable: 1, 'stats.whaleVolume': -1 } },
+    { key: { 'stats.latestTradeTs': -1 } },
+    { key: { refreshedAt: 1 } },
+    { key: { staleAt: 1 } },
   ]);
 
   log.info('Indexes ensured');

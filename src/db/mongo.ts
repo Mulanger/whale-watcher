@@ -68,6 +68,65 @@ export interface MarketDoc {
   refreshedAt: Date;
 }
 
+export interface MarketPageWalletSnapshot {
+  rank: number;
+  proxyWallet: string;
+  pseudonym: string | null;
+  displayName: string | null;
+  profileImage: string | null;
+  volume: number;
+  tradeCount: number;
+  avgTrade: number;
+}
+
+export interface MarketPageRelatedSnapshot {
+  slug: string;
+  title: string;
+  icon: string | null;
+  eventSlug: string | null;
+  whaleVolume: number;
+  whaleTradeCount: number;
+  score: number;
+}
+
+export interface MarketPageSnapshotDoc {
+  _id: string;
+  slug: string;
+  market: {
+    slug: string;
+    conditionId: string | null;
+    title: string;
+    icon: string | null;
+    category: string | null;
+    eventSlug: string | null;
+    polymarketUrl: string | null;
+    endDate: Date | null;
+    active: boolean | null;
+    yesPriceCents: number | null;
+    noPriceCents: number | null;
+    volume24h: number | null;
+    liquidity: number | null;
+  };
+  stats: {
+    whaleVolume: number;
+    whaleTradeCount: number;
+    uniqueWhales: number;
+    biggestTradeUsd: number;
+    latestTradeTs: number;
+    firstTradeTs: number;
+  };
+  topWallets: MarketPageWalletSnapshot[];
+  relatedMarkets: MarketPageRelatedSnapshot[];
+  indexable: boolean;
+  indexingReason: string;
+  source: 'market_page_worker';
+  lookbackDays: number;
+  refreshedAt: Date;
+  lastQualifiedAt: Date | null;
+  staleAt: Date | null;
+  prunedAt?: Date | null;
+}
+
 export interface TraderDoc {
   _id: string;
   pseudonym: string | null;
@@ -122,6 +181,7 @@ export async function connectMongo(): Promise<{
   intentDiscards: Collection<IntentDiscardDoc>;
   tradeEvents: Collection<TradeEventDoc>;
   traderDailyStats: Collection<TraderDailyStatsDoc>;
+  marketPageSnapshots: Collection<MarketPageSnapshotDoc>;
 }> {
   const config = loadConfig();
   const log = getLogger();
@@ -136,6 +196,7 @@ export async function connectMongo(): Promise<{
       intentDiscards: _db.collection<IntentDiscardDoc>('intent_discards'),
       tradeEvents: _db.collection<TradeEventDoc>('trade_events'),
       traderDailyStats: _db.collection<TraderDailyStatsDoc>('trader_daily_stats'),
+      marketPageSnapshots: _db.collection<MarketPageSnapshotDoc>('market_page_snapshots'),
     };
   }
 
@@ -155,6 +216,7 @@ export async function connectMongo(): Promise<{
     intentDiscards: _db.collection<IntentDiscardDoc>('intent_discards'),
     tradeEvents: _db.collection<TradeEventDoc>('trade_events'),
     traderDailyStats: _db.collection<TraderDailyStatsDoc>('trader_daily_stats'),
+    marketPageSnapshots: _db.collection<MarketPageSnapshotDoc>('market_page_snapshots'),
   };
 }
 

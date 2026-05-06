@@ -10,6 +10,7 @@ import { runIntentWorker, stopIntentWorker } from './pipeline/intent_worker.js';
 import { startRefreshMarketsJob } from './jobs/refresh_markets.js';
 import { startRefreshTraderStatsJob } from './jobs/refresh_trader_stats.js';
 import { startDailyAggregator, type DailyAggregatorHandle } from './jobs/aggregate_daily_stats.js';
+import { startMarketPageSnapshotsJob, type MarketPagesHandle } from './jobs/refresh_market_page_snapshots.js';
 import { startHealthServer } from './http/health.js';
 import { sourceTradeAgeMs, type SourceTradeSnapshot } from './pipeline/source_trade.js';
 
@@ -19,6 +20,7 @@ let allTradesPoller: AllTradesPoller | null = null;
 let refreshMarketsInterval: ReturnType<typeof setInterval> | null = null;
 let refreshTradersInterval: ReturnType<typeof setInterval> | null = null;
 let dailyAggregator: DailyAggregatorHandle | null = null;
+let marketPages: MarketPagesHandle | null = null;
 let healthServer: ReturnType<typeof startHealthServer> | null = null;
 
 async function main(): Promise<void> {
@@ -34,8 +36,9 @@ async function main(): Promise<void> {
     intentDiscards,
     tradeEvents,
     traderDailyStats,
+    marketPageSnapshots,
   } = await connectMongo();
-  await ensureIndexes(trades, markets, traders, intentDiscards, tradeEvents, traderDailyStats);
+  await ensureIndexes(trades, markets, traders, intentDiscards, tradeEvents, traderDailyStats, marketPageSnapshots);
 
   await connectRedis();
 
@@ -64,11 +67,14 @@ async function main(): Promise<void> {
 
   refreshMarketsInterval = startRefreshMarketsJob(trades, markets);
   refreshTradersInterval = startRefreshTraderStatsJob(trades, traders);
+  if (config.marketPagesEnabled) {
+    marketPages = startMarketPageSnapshotsJob(trades, markets, marketPageSnapshots);
+  }
 
   if (config.tradeEventsEnabled) {
     allTradesPoller = new AllTradesPoller(tradeEvents);
     await allTradesPoller.start();
-    dailyAggregator = startDailyAggregator(tradeEvents, traderDailyStats, trades);
+    dailyAggregator = startDailyAggregator(traderDailyStats, trades);
   }
 
   healthServer = startHealthServer(config.healthPort, () => {
@@ -106,6 +112,7 @@ async function main(): Promise<void> {
         dataApiTradeEvents,
       },
       leaderboard: getLeaderboardHealth(config, allTradesPoller, dailyAggregator),
+      marketPages: getMarketPagesHealth(config, marketPages),
     };
   });
 
@@ -125,6 +132,7 @@ process.on('SIGTERM', async () => {
   if (refreshMarketsInterval) clearInterval(refreshMarketsInterval);
   if (refreshTradersInterval) clearInterval(refreshTradersInterval);
   if (dailyAggregator) dailyAggregator.stop();
+  if (marketPages) marketPages.stop();
 
   await Promise.all([closeMongo(), closeRedis()]);
 
@@ -147,6 +155,7 @@ process.on('SIGINT', async () => {
   if (refreshMarketsInterval) clearInterval(refreshMarketsInterval);
   if (refreshTradersInterval) clearInterval(refreshTradersInterval);
   if (dailyAggregator) dailyAggregator.stop();
+  if (marketPages) marketPages.stop();
 
   await Promise.all([closeMongo(), closeRedis()]);
 
@@ -221,5 +230,36 @@ function getSourceTradeHealth(
     latestSourceTradeAge,
     staleAfterMs,
     stale: latestSourceTradeAge > staleAfterMs,
+  };
+}
+
+function getMarketPagesHealth(
+  config: ReturnType<typeof loadConfig>,
+  marketPagesHandle: MarketPagesHandle | null
+) {
+  if (!config.marketPagesEnabled) {
+    return { enabled: false, ok: true };
+  }
+
+  const state = marketPagesHandle?.getState() ?? null;
+  const now = Date.now();
+  const lastRunAge = state?.lastRunAt ? now - state.lastRunAt : Infinity;
+  const staleAfterMs = Math.max(config.marketPagesIntervalMs * 2, 10 * 60_000);
+  const ok = Boolean(state)
+    && lastRunAge < staleAfterMs
+    && !state?.lastError;
+
+  return {
+    enabled: true,
+    ok,
+    lastRunAt: state?.lastRunAt ?? null,
+    lastRunAge,
+    lastError: state?.lastError ?? null,
+    lastSnapshotsUpdated: state?.lastSnapshotsUpdated ?? 0,
+    lastIndexableCount: state?.lastIndexableCount ?? 0,
+    lastStaleCount: state?.lastStaleCount ?? 0,
+    lastPrunedCount: state?.lastPrunedCount ?? 0,
+    running: state?.running ?? false,
+    staleAfterMs,
   };
 }
