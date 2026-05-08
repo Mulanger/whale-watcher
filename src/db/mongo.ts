@@ -170,6 +170,26 @@ export interface TraderDailyStatsDoc {
   updatedAt: Date;
 }
 
+export interface TraderPageIndexDoc {
+  _id: string;
+  proxyWallet: string;
+  pseudonym: string | null;
+  displayName: string | null;
+  profileImage: string | null;
+  firstSeenTs: number;
+  lastSeenTs: number;
+  firstLeaderboardAt: number;
+  lastLeaderboardAt: number;
+  bestRank: number;
+  bestRankWindow: '1d' | '7d' | '30d' | '365d';
+  bestVolume: number;
+  tradeCount: number;
+  whaleCount: number;
+  indexable: boolean;
+  source: 'trader_page_worker';
+  updatedAt: Date;
+}
+
 export type WhaleTier = 'mega' | 'large' | 'whale' | 'mini' | 'sub';
 
 export async function connectMongo(): Promise<{
@@ -182,6 +202,7 @@ export async function connectMongo(): Promise<{
   tradeEvents: Collection<TradeEventDoc>;
   traderDailyStats: Collection<TraderDailyStatsDoc>;
   marketPageSnapshots: Collection<MarketPageSnapshotDoc>;
+  traderPageIndex: Collection<TraderPageIndexDoc>;
 }> {
   const config = loadConfig();
   const log = getLogger();
@@ -197,6 +218,7 @@ export async function connectMongo(): Promise<{
       tradeEvents: _db.collection<TradeEventDoc>('trade_events'),
       traderDailyStats: _db.collection<TraderDailyStatsDoc>('trader_daily_stats'),
       marketPageSnapshots: _db.collection<MarketPageSnapshotDoc>('market_page_snapshots'),
+      traderPageIndex: _db.collection<TraderPageIndexDoc>('trader_page_index'),
     };
   }
 
@@ -217,6 +239,7 @@ export async function connectMongo(): Promise<{
     tradeEvents: _db.collection<TradeEventDoc>('trade_events'),
     traderDailyStats: _db.collection<TraderDailyStatsDoc>('trader_daily_stats'),
     marketPageSnapshots: _db.collection<MarketPageSnapshotDoc>('market_page_snapshots'),
+    traderPageIndex: _db.collection<TraderPageIndexDoc>('trader_page_index'),
   };
 }
 

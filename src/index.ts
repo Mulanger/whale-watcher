@@ -11,6 +11,7 @@ import { startRefreshMarketsJob } from './jobs/refresh_markets.js';
 import { startRefreshTraderStatsJob } from './jobs/refresh_trader_stats.js';
 import { startDailyAggregator, type DailyAggregatorHandle } from './jobs/aggregate_daily_stats.js';
 import { startMarketPageSnapshotsJob, type MarketPagesHandle } from './jobs/refresh_market_page_snapshots.js';
+import { startTraderPageIndexJob, type TraderPageIndexHandle } from './jobs/refresh_trader_page_index.js';
 import { startHealthServer } from './http/health.js';
 import { sourceTradeAgeMs, type SourceTradeSnapshot } from './pipeline/source_trade.js';
 
@@ -21,6 +22,7 @@ let refreshMarketsInterval: ReturnType<typeof setInterval> | null = null;
 let refreshTradersInterval: ReturnType<typeof setInterval> | null = null;
 let dailyAggregator: DailyAggregatorHandle | null = null;
 let marketPages: MarketPagesHandle | null = null;
+let traderPages: TraderPageIndexHandle | null = null;
 let healthServer: ReturnType<typeof startHealthServer> | null = null;
 
 async function main(): Promise<void> {
@@ -37,8 +39,9 @@ async function main(): Promise<void> {
     tradeEvents,
     traderDailyStats,
     marketPageSnapshots,
+    traderPageIndex,
   } = await connectMongo();
-  await ensureIndexes(trades, markets, traders, intentDiscards, tradeEvents, traderDailyStats, marketPageSnapshots);
+  await ensureIndexes(trades, markets, traders, intentDiscards, tradeEvents, traderDailyStats, marketPageSnapshots, traderPageIndex);
 
   await connectRedis();
 
@@ -69,6 +72,9 @@ async function main(): Promise<void> {
   refreshTradersInterval = startRefreshTraderStatsJob(trades, traders);
   if (config.marketPagesEnabled) {
     marketPages = startMarketPageSnapshotsJob(trades, markets, marketPageSnapshots);
+  }
+  if (config.traderPagesEnabled) {
+    traderPages = startTraderPageIndexJob(trades, traderPageIndex);
   }
 
   if (config.tradeEventsEnabled) {
@@ -113,6 +119,7 @@ async function main(): Promise<void> {
       },
       leaderboard: getLeaderboardHealth(config, allTradesPoller, dailyAggregator),
       marketPages: getMarketPagesHealth(config, marketPages),
+      traderPages: getTraderPagesHealth(config, traderPages),
     };
   });
 
@@ -133,6 +140,7 @@ process.on('SIGTERM', async () => {
   if (refreshTradersInterval) clearInterval(refreshTradersInterval);
   if (dailyAggregator) dailyAggregator.stop();
   if (marketPages) marketPages.stop();
+  if (traderPages) traderPages.stop();
 
   await Promise.all([closeMongo(), closeRedis()]);
 
@@ -156,6 +164,7 @@ process.on('SIGINT', async () => {
   if (refreshTradersInterval) clearInterval(refreshTradersInterval);
   if (dailyAggregator) dailyAggregator.stop();
   if (marketPages) marketPages.stop();
+  if (traderPages) traderPages.stop();
 
   await Promise.all([closeMongo(), closeRedis()]);
 
@@ -259,6 +268,35 @@ function getMarketPagesHealth(
     lastIndexableCount: state?.lastIndexableCount ?? 0,
     lastStaleCount: state?.lastStaleCount ?? 0,
     lastPrunedCount: state?.lastPrunedCount ?? 0,
+    running: state?.running ?? false,
+    staleAfterMs,
+  };
+}
+
+function getTraderPagesHealth(
+  config: ReturnType<typeof loadConfig>,
+  traderPagesHandle: TraderPageIndexHandle | null
+) {
+  if (!config.traderPagesEnabled) {
+    return { enabled: false, ok: true };
+  }
+
+  const state = traderPagesHandle?.getState() ?? null;
+  const now = Date.now();
+  const lastRunAge = state?.lastRunAt ? now - state.lastRunAt : Infinity;
+  const staleAfterMs = Math.max(config.traderPagesIntervalMs * 2, 10 * 60_000);
+  const ok = Boolean(state)
+    && lastRunAge < staleAfterMs
+    && !state?.lastError;
+
+  return {
+    enabled: true,
+    ok,
+    lastRunAt: state?.lastRunAt ?? null,
+    lastRunAge,
+    lastError: state?.lastError ?? null,
+    lastIndexedCount: state?.lastIndexedCount ?? 0,
+    lastCandidateCount: state?.lastCandidateCount ?? 0,
     running: state?.running ?? false,
     staleAfterMs,
   };

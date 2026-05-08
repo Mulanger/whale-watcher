@@ -54,6 +54,18 @@ export interface MarketPagesHealthStatus {
   staleAfterMs?: number;
 }
 
+export interface TraderPagesHealthStatus {
+  enabled: boolean;
+  ok: boolean;
+  lastRunAt?: number | null;
+  lastRunAge?: number;
+  lastError?: string | null;
+  lastIndexedCount?: number;
+  lastCandidateCount?: number;
+  running?: boolean;
+  staleAfterMs?: number;
+}
+
 export interface HealthStatus {
   mongoConnected: boolean;
   redisConnected: boolean;
@@ -64,6 +76,7 @@ export interface HealthStatus {
   upstream?: UpstreamHealthStatus;
   leaderboard?: LeaderboardHealthStatus;
   marketPages?: MarketPagesHealthStatus;
+  traderPages?: TraderPagesHealthStatus;
 }
 
 export function startHealthServer(
@@ -77,7 +90,8 @@ export function startHealthServer(
       const lastPollAge = h.lastPollAt ? now - h.lastPollAt : Infinity;
       const leaderboardOk = h.leaderboard?.ok ?? true;
       const marketPagesOk = h.marketPages?.ok ?? true;
-      const ok = h.mongoConnected && h.redisConnected && lastPollAge < 30_000 && leaderboardOk && marketPagesOk;
+      const traderPagesOk = h.traderPages?.ok ?? true;
+      const ok = h.mongoConnected && h.redisConnected && lastPollAge < 30_000 && leaderboardOk && marketPagesOk && traderPagesOk;
 
       res.statusCode = ok ? 200 : 503;
       res.setHeader('content-type', 'application/json');
@@ -92,6 +106,7 @@ export function startHealthServer(
         upstream: h.upstream,
         leaderboard: h.leaderboard,
         marketPages: h.marketPages,
+        traderPages: h.traderPages,
       }));
     } else {
       res.statusCode = 404;

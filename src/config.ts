@@ -25,6 +25,9 @@ const ConfigSchema = z.object({
   marketPagesMinTrades: z.number().int().positive(),
   marketPagesMinVolumeUsd: z.number().positive(),
   marketPagesPruneAfterDays: z.number().int().positive(),
+  traderPagesEnabled: z.boolean(),
+  traderPagesIntervalMs: z.number().int().positive(),
+  traderPagesIndexLimit: z.number().int().positive(),
   healthPort: z.number().int().positive(),
 });
 
@@ -60,6 +63,9 @@ export function loadConfig(): Config {
     marketPagesMinTrades: parseInt(process.env['MARKET_PAGES_MIN_TRADES'] ?? '3', 10),
     marketPagesMinVolumeUsd: parseFloat(process.env['MARKET_PAGES_MIN_VOLUME_USD'] ?? '50000'),
     marketPagesPruneAfterDays: parseInt(process.env['MARKET_PAGES_PRUNE_AFTER_DAYS'] ?? '120', 10),
+    traderPagesEnabled: (process.env['TRADER_PAGES_ENABLED'] ?? 'true') === 'true',
+    traderPagesIntervalMs: parseInt(process.env['TRADER_PAGES_INTERVAL_MS'] ?? '300000', 10),
+    traderPagesIndexLimit: parseInt(process.env['TRADER_PAGES_INDEX_LIMIT'] ?? '500', 10),
     healthPort: parseInt(process.env['HEALTH_PORT'] ?? '8080', 10),
   };
 
