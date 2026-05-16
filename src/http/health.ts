@@ -95,6 +95,8 @@ export function startHealthServer(
 
       res.statusCode = ok ? 200 : 503;
       res.setHeader('content-type', 'application/json');
+      res.setHeader('cache-control', 'no-store');
+      res.setHeader('x-content-type-options', 'nosniff');
       res.end(JSON.stringify({
         ok,
         mongoConnected: h.mongoConnected,

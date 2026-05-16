@@ -18,6 +18,8 @@ import {
 } from './schemas.js';
 
 const agent = new Agent({ keepAliveTimeout: 30_000, connections: 10 });
+const REQUEST_HEADERS_TIMEOUT_MS = 10_000;
+const REQUEST_BODY_TIMEOUT_MS = 30_000;
 
 class RetriableError extends Error {}
 
@@ -34,12 +36,17 @@ async function get<T>(
 
   return pRetry(
     async () => {
-      const res = await request(url, { dispatcher: agent, method: 'GET' });
+      const res = await request(url, {
+        dispatcher: agent,
+        method: 'GET',
+        headersTimeout: REQUEST_HEADERS_TIMEOUT_MS,
+        bodyTimeout: REQUEST_BODY_TIMEOUT_MS,
+      });
       if (res.statusCode === 429 || res.statusCode >= 500) {
         throw new RetriableError(`status ${res.statusCode}`);
       }
       if (res.statusCode >= 400) {
-        throw new AbortError(`status ${res.statusCode}: ${await res.body.text()}`);
+        throw new AbortError(`status ${res.statusCode}`);
       }
       const json = await res.body.json();
       return schema.parse(json);
